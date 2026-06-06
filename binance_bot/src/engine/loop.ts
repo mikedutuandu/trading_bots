@@ -472,8 +472,10 @@ export async function runScheduled(
   while (running) {
     const now = Date.now();
     const nextBoundary = Math.ceil((now + 1) / barMs) * barMs;
-    const wait = nextBoundary - now + buffer;
-    logger.info(`next tick in ${Math.round(wait / 1000)}s (at ${new Date(nextBoundary + buffer).toISOString()})`);
+    const nextTick = nextBoundary + buffer;
+    const wait = nextTick - now;
+    setMeta("engine:nextTickTime", String(nextTick)); // dashboard countdown / liveness
+    logger.info(`next tick in ${Math.round(wait / 1000)}s (at ${new Date(nextTick).toISOString()})`);
     await sleep(wait);
     if (!running) break;
     await safeTick(broker, deps);

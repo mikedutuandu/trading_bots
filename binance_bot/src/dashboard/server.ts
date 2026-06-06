@@ -63,7 +63,7 @@ const PAGE = `<!doctype html>
   .kpi { background: #11161f; border: 1px solid #1c2230; border-radius: 10px; padding: 12px 14px; }
   .kpi .label { color: #8b949e; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
   .kpi .val { font-size: 20px; font-weight: 600; margin-top: 4px; }
-  .pos { color: #3fb950; } .neg { color: #f85149; } .muted { color: #8b949e; }
+  .pos { color: #3fb950; } .neg { color: #f85149; } .muted { color: #8b949e; } .warn { color: #d29922; }
   section { margin-bottom: 24px; }
   section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: #8b949e; margin: 0 0 8px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -73,6 +73,10 @@ const PAGE = `<!doctype html>
   .card { background: #11161f; border: 1px solid #1c2230; border-radius: 10px; padding: 14px; }
   svg { width: 100%; height: 160px; display: block; }
   .tag { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #1c2230; color: #8b949e; }
+  .stg { display: inline-block; min-width: 20px; text-align: center; padding: 1px 6px; border-radius: 6px;
+         font-weight: 700; font-size: 12px; margin-right: 6px; }
+  .stg1 { background: #21262d; color: #8b949e; } .stg2 { background: #16331f; color: #3fb950; }
+  .stg3 { background: #3a2e12; color: #d29922; }
   .hint { font-size: 12px; color: #8b949e; margin: -4px 0 8px; }
   .long { color: #3fb950; } .short { color: #f85149; }
   .ctx { padding: 8px 20px; border-bottom: 1px solid #1c2230; color: #8b949e; font-size: 12px;
@@ -94,7 +98,7 @@ const PAGE = `<!doctype html>
   <div class="kpis" id="kpis"></div>
   <section><h2>Equity</h2><div class="card"><svg id="chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg></div></section>
   <section><h2>Open positions</h2>
-    <div class="hint">Max loss = PnL if the current Stop hits (≈0 once it moves to breakeven) · Target = +2R goal (bot takes ½ there, trails the rest) · R now = current profit in risk-multiples</div>
+    <div class="hint">Max loss = PnL if the current Stop hits (≈0 once it moves to breakeven) · Target = +2R goal (bot takes ½ there, trails the rest) · R now = current profit in risk-multiples · Timeout = stage (1 = pre-TP1, 2 = TP1→TP2, 3 = runner) + time left until the lifecycle time-stop force-closes</div>
     <div class="card"><table id="open"></table></div></section>
   <section><h2>By playbook</h2><div class="card"><table id="pb"></table></div></section>
   <section><h2>Recent closed</h2><div class="card"><table id="closed"></table></div></section>
@@ -104,6 +108,7 @@ const usd = (x) => (x>=0?'+':'') + (x??0).toFixed(2);
 const pct = (x) => ((x??0)*100).toFixed(1) + '%';
 const sign = (x) => x>=0 ? 'pos' : 'neg';
 const ago = (ms) => { if(ms==null) return '—'; const s=Math.round(ms/1000); if(s<90) return s+'s ago'; const m=Math.round(s/60); if(m<90) return m+'m ago'; return Math.round(m/60)+'h ago'; };
+const dur = (ms) => { const s=Math.round(ms/1000); if(s<90) return s+'s'; const m=Math.round(s/60); if(m<90) return m+'m'; const h=m/60; if(h<48) return (h<10?h.toFixed(1):Math.round(h))+'h'; return Math.round(h/24)+'d'; };
 const tdate = (ts) => ts ? new Date(ts).toISOString().slice(5,16).replace('T',' ') : '—';
 
 function kpi(label, val, cls) { return '<div class="kpi"><div class="label">'+label+'</div><div class="val '+(cls||'')+'">'+val+'</div></div>'; }
@@ -143,19 +148,23 @@ async function tick() {
   const m = s.metrics;
   document.getElementById('dot').className = 'dot ' + s.health.status;
   document.getElementById('venue').textContent = s.venue;
-  document.getElementById('status').textContent = s.health.status + ' · last tick ' + ago(s.health.ageMs) + ' · ' + s.timeframe;
+  const next = s.health.nextInMs;
+  const nextStr = next==null ? '' : (next>0 ? ' · next tick in '+dur(next) : ' · tick overdue');
+  document.getElementById('status').textContent = s.health.status + ' · last tick ' + ago(s.health.ageMs) + nextStr + ' · ' + s.timeframe;
   document.getElementById('updated').textContent = 'refreshed ' + new Date(s.now).toLocaleTimeString();
   document.getElementById('ctx').innerHTML = ctxStrip(s.context);
 
+  // No closed trades yet → trade-ratio metrics are undefined; show "—" not 0.0%/∞/0R.
+  const noTrades = m.trades === 0;
   document.getElementById('kpis').innerHTML = [
     kpi('Equity', m.endEquity.toFixed(2)),
     kpi('Unrealized (live)', usd(s.unrealizedPnl), sign(s.unrealizedPnl)),
-    kpi('Net PnL (closed)', usd(m.netPnl), sign(m.netPnl)),
+    kpi('Net PnL (closed)', noTrades?'—':usd(m.netPnl), noTrades?'muted':sign(m.netPnl)),
     kpi('Today', usd(s.today.netPnl)+'  ('+s.today.trades+')', sign(s.today.netPnl)),
     kpi('Return', pct(m.returnPct), sign(m.returnPct)),
-    kpi('Win rate', pct(m.winRate)),
-    kpi('Expectancy', m.expectancyR.toFixed(3)+'R', sign(m.expectancyR)),
-    kpi('Profit factor', m.profitFactor===null?'∞':(isFinite(m.profitFactor)?m.profitFactor.toFixed(2):'∞'), sign(m.profitFactor-1)),
+    kpi('Win rate', noTrades?'—':pct(m.winRate), noTrades?'muted':''),
+    kpi('Expectancy', noTrades?'—':(m.expectancyR.toFixed(3)+'R'), noTrades?'muted':sign(m.expectancyR)),
+    kpi('Profit factor', noTrades?'—':(m.profitFactor==null||!isFinite(m.profitFactor)?'∞':m.profitFactor.toFixed(2)), noTrades?'muted':sign(m.profitFactor-1)),
     kpi('Max DD', pct(m.maxDrawdownPct), 'neg'),
     kpi('Trades', m.trades + ' ('+m.wins+'W/'+m.losses+'L)'),
     kpi('Fees', usd(-m.commission), 'neg'),
@@ -164,7 +173,7 @@ async function tick() {
 
   chart(s.equityCurve);
 
-  table('open', ['Symbol','Side','Entry','Mark','Stop','Max loss','Target (+2R)','uPnL (live)','R now','TP','Age'],
+  table('open', ['Symbol','Side','Entry','Mark','Stop','Max loss','Target (+2R)','uPnL (live)','R now','TP','Timeout','Age'],
     s.open.map(p => {
       const risk = p.riskUsdt;
       const rNow = (risk && p.unrealizedPnl!=null) ? p.unrealizedPnl/risk : null;
@@ -172,6 +181,11 @@ async function tick() {
       const sgn = p.side==='long' ? 1 : -1;
       const atStop = sgn*(p.stop - p.entry)*p.qtyRemaining;
       const atStopCls = atStop < -0.01 ? 'neg' : atStop > 0.01 ? 'pos' : 'muted';
+      // Lifecycle timeout: ①/②/③ + time until it force-closes (amber when close).
+      const to = p.timeout;
+      const toCell = !to ? '<td class="muted">—</td>'
+        : '<td class="'+(to.leftMs < to.limitMs*0.2 ? 'warn' : 'muted')+'">'
+          + '<span class="stg stg'+to.stage+'">'+to.stage+'</span>' + (to.leftMs<=0?'now':dur(to.leftMs)) + '</td>';
       return '<tr><td>'+p.symbol+'</td><td class="'+p.side+'">'+p.side+'</td>'
         +'<td>'+p.entry+'</td>'
         +'<td>'+(p.markPrice!=null?p.markPrice:'—')+'</td>'
@@ -181,6 +195,7 @@ async function tick() {
         +'<td class="'+(p.unrealizedPnl==null?'muted':sign(p.unrealizedPnl))+'">'+(p.unrealizedPnl==null?'—':usd(p.unrealizedPnl))+'</td>'
         +'<td class="'+(rNow==null?'muted':sign(rNow))+'">'+(rNow==null?'—':(rNow>=0?'+':'')+rNow.toFixed(2)+'R')+'</td>'
         +'<td>'+(p.tp2Hit?'TP2':p.tp1Hit?'TP1✓':'—')+'</td>'
+        + toCell
         +'<td class="muted">'+ago(s.now-p.openedAt)+'</td></tr>';
     }));
 

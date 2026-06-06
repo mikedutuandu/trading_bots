@@ -5,7 +5,24 @@ import { loadPositions } from "../storage/positions.js";
 import { getEquityCurve, getMeta, getMetaNum } from "../storage/engineState.js";
 import { metricsFromTrades, groupBy } from "../backtest/metrics.js";
 import { getMarkPrice } from "../exchange/marketData.js";
+import { paramsFromEnv } from "../playbooks/paramsFromEnv.js";
 import { intervalMs } from "../engine/loop.js";
+
+/** The lifecycle timeout that fires FIRST for a position in its current state
+ *  (pre-TP1 → maxHold, TP1→TP2 → stall, plus the global cap), or null if all are
+ *  disabled. Mirrors the partition in manageOnCandle (every tier gated on > 0). */
+function activeTimeout(
+  tp1Hit: boolean,
+  tp2Hit: boolean,
+  p: { maxHoldBars: number; stallBars: number; maxTotalBars: number },
+): { stage: 1 | 2 | 3; bars: number } | null {
+  const tiers: Array<{ stage: 1 | 2 | 3; bars: number }> = [];
+  if (!tp1Hit && p.maxHoldBars > 0) tiers.push({ stage: 1, bars: p.maxHoldBars });
+  if (tp1Hit && !tp2Hit && p.stallBars > 0) tiers.push({ stage: 2, bars: p.stallBars });
+  if (p.maxTotalBars > 0) tiers.push({ stage: 3, bars: p.maxTotalBars });
+  if (!tiers.length) return null;
+  return tiers.reduce((a, b) => (b.bars < a.bars ? b : a));
+}
 
 /** The bot's configured behaviour — so the dashboard shows WHAT it's set to do. */
 function context() {
@@ -60,17 +77,36 @@ export async function buildState() {
   const todays = closed.filter((t) => t.closedAt && dayKey(t.closedAt) === today);
   const todayPnl = todays.reduce((s, t) => s + (t.netPnl ?? 0), 0);
 
-  // Health: how fresh is the last engine tick vs the expected cadence?
+  // Health: how fresh is the last tick, and when is the next one scheduled?
+  const params = paramsFromEnv();
   const lastTick = getMetaNum("engine:lastTickTime");
+  const nextTick = getMetaNum("engine:nextTickTime");
   const barMs = intervalMs(config.strategy.timeframe);
   const ageMs = lastTick ? Date.now() - lastTick : null;
-  const status = lastTick === null ? "idle" : ageMs! > 2 * barMs + 5 * 60_000 ? "stale" : "online";
+  const nextInMs = nextTick ? nextTick - Date.now() : null;
+  // Stale = well past the scheduled next tick (process likely died). Fall back to
+  // tick-age when nextTick is absent (data from before this field existed).
+  const status =
+    lastTick === null && nextTick === null
+      ? "idle"
+      : nextTick !== null
+        ? Date.now() > nextTick + 5 * 60_000
+          ? "stale"
+          : "online"
+        : ageMs! > 2 * barMs + 5 * 60_000
+          ? "stale"
+          : "online";
 
   const openPositions = open.map((p) => {
     const mark = marks.get(p.symbol) ?? null;
     const sign = p.pos.side === "long" ? 1 : -1;
     // Live mark-to-market on the remaining qty (matches Binance's Unrealized PNL).
     const unrealizedPnl = mark === null ? null : sign * (mark - p.pos.entry) * p.pos.qtyRemaining;
+    // Which lifecycle timeout will fire first, and how long until it does.
+    const to = activeTimeout(p.pos.tp1Hit, p.pos.tp2Hit, params);
+    const timeout = to
+      ? { stage: to.stage, limitMs: to.bars * barMs, leftMs: to.bars * barMs - (Date.now() - p.openedAt) }
+      : null;
     return {
       symbol: p.symbol,
       side: p.pos.side,
@@ -87,6 +123,7 @@ export async function buildState() {
       riskUsdt: p.riskUsdt,
       unrealizedPnl, // live
       realizedSoFar: p.grossPnl - p.commission + p.funding, // booked (fees + partial TPs)
+      timeout, // active lifecycle timeout {stage, limitMs, leftMs} or null
       openedAt: p.openedAt,
     };
   });
@@ -100,7 +137,7 @@ export async function buildState() {
     context: context(),
     today: { trades: todays.length, netPnl: todayPnl },
     unrealizedPnl, // live floating PnL of open positions
-    health: { lastTick, ageMs, status },
+    health: { lastTick, ageMs, nextTick, nextInMs, status },
     metrics,
     open: openPositions,
     byPlaybook,
