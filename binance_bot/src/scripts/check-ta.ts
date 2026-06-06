@@ -1,0 +1,13 @@
+import { getCandles } from "../storage/candles.js";
+import { ema, atr, rsi, adx, donchian } from "../indicators/ta.js";
+const c = getCandles("BTCUSDT", "1h", { limit: 720 });
+const closes = c.map((x) => x.close);
+const last = (a: number[]) => a[a.length - 1]!;
+console.log("EMA([1..10],3) last =", last(ema([1,2,3,4,5,6,7,8,9,10],3)).toFixed(4), "(expect 8.9961)");
+console.log("candles:", c.length);
+console.log("EMA50 :", last(ema(closes,50)).toFixed(2), " EMA200:", last(ema(closes,200)).toFixed(2));
+console.log("ATR14 :", last(atr(c,14)).toFixed(2), "(>0)");
+console.log("RSI14 :", last(rsi(c,14)).toFixed(2), "(0-100)");
+console.log("ADX14 :", last(adx(c,14)).toFixed(2), "(0-100)");
+const d = donchian(c,20);
+console.log("Donchian20:", last(d.upper).toFixed(2), "/", last(d.lower).toFixed(2));

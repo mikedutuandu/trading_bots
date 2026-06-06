@@ -1,0 +1,43 @@
+{
+  "name": "binance-futures-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Systematic Binance USDT-M perpetual futures bot (long/short, R-based risk)",
+  "type": "module",
+  "scripts": {
+    "collect": "tsx src/scripts/collect.ts",
+    "collect-funding": "tsx src/scripts/collect-funding.ts",
+    "universe": "tsx src/scripts/snapshot-universe.ts",
+    "backtest": "tsx src/scripts/backtest.ts",
+    "optimize": "tsx src/scripts/optimize.ts",
+    "testnet": "DB_PATH=./data/testnet.sqlite tsx src/scripts/testnet.ts",
+    "live": "DB_PATH=./data/live.sqlite tsx src/scripts/live.ts",
+    "account": "DB_PATH=./data/testnet.sqlite tsx src/scripts/account.ts",
+    "account:live": "DB_PATH=./data/live.sqlite VENUE=live tsx src/scripts/account.ts",
+    "flatten": "DB_PATH=./data/testnet.sqlite tsx src/scripts/flatten.ts",
+    "flatten:live": "DB_PATH=./data/live.sqlite VENUE=live tsx src/scripts/flatten.ts",
+    "test-order": "DB_PATH=./data/testnet.sqlite tsx src/scripts/test-order.ts",
+    "dashboard": "tsx src/scripts/dashboard.ts",
+    "dashboard:testnet": "DB_PATH=./data/testnet.sqlite DASHBOARD_PORT=8787 tsx src/scripts/dashboard.ts",
+    "dashboard:live": "DB_PATH=./data/live.sqlite DASHBOARD_PORT=8788 tsx src/scripts/dashboard.ts",
+    "backup": "tsx src/scripts/backup.ts",
+    "smoke": "tsx src/scripts/smoke.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.5.0",
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.9.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

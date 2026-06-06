@@ -1,0 +1,120 @@
+import "dotenv/config";
+
+function env(key: string, fallback?: string): string {
+  const v = process.env[key] ?? fallback;
+  if (v === undefined) throw new Error(`Missing env var: ${key}`);
+  return v;
+}
+
+function num(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) throw new Error(`Invalid number for ${key}: ${raw}`);
+  return n;
+}
+
+function int(key: string, fallback: number): number {
+  const n = num(key, fallback);
+  if (!Number.isInteger(n)) throw new Error(`Expected integer for ${key}: got ${n}`);
+  return n;
+}
+
+function bool(key: string, fallback: boolean): boolean {
+  const raw = (process.env[key] ?? "").toLowerCase().trim();
+  if (raw === "") return fallback;
+  if (["1", "true", "yes", "y"].includes(raw)) return true;
+  if (["0", "false", "no", "n"].includes(raw)) return false;
+  throw new Error(`Invalid bool for ${key}: ${raw}`);
+}
+
+function list(key: string): string[] {
+  return (process.env[key] ?? "")
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+export type Mode = "backtest" | "paper" | "live";
+export type UniverseMode = "dynamic" | "static";
+
+// Stablecoins / wrapped / index products we never want to trade as directional perps.
+const DEFAULT_DENYLIST = [
+  "USDCUSDT",
+  "FDUSDUSDT",
+  "TUSDUSDT",
+  "BTCDOMUSDT",
+  "USDPUSDT",
+  "EURUSDT",
+];
+
+export const config = {
+  mode: env("MODE", "backtest") as Mode,
+  allowLive: bool("ALLOW_LIVE", false),
+
+  binance: {
+    // Mainnet keys (used by `npm run live`).
+    apiKey: process.env.BINANCE_API_KEY ?? "",
+    apiSecret: process.env.BINANCE_API_SECRET ?? "",
+    // Test-venue keys (used by `npm run testnet`). Fall back to the mainnet keys
+    // so a single-key setup keeps working; set these when the test venue needs
+    // its own keys (e.g. testnet.binancefuture.com).
+    testnetApiKey: process.env.BINANCE_TESTNET_API_KEY || process.env.BINANCE_API_KEY || "",
+    testnetApiSecret: process.env.BINANCE_TESTNET_API_SECRET || process.env.BINANCE_API_SECRET || "",
+    // Mainnet host — used for market data / backtest and for the `live` run.
+    baseUrl: env("BINANCE_BASE_URL", "https://fapi.binance.com"),
+    wsUrl: env("BINANCE_WS_URL", "wss://fstream.binance.com"),
+    // Test venue — used by the `testnet` run (risk-free real orders). The Binance
+    // futures sandbox is now "Demo Trading" (demo-fapi.binance.com); the old
+    // testnet.binancefuture.com redirects here. Realistic prices, but it rejects
+    // STOP_MARKET (-4120) so the bot manages stops on candle close.
+    testnetBaseUrl: env("BINANCE_TESTNET_BASE_URL", "https://demo-fapi.binance.com"),
+    testnetWsUrl: env("BINANCE_TESTNET_WS_URL", "wss://demo-fstream.binance.com"),
+    recvWindow: int("BINANCE_RECV_WINDOW", 5000),
+  },
+
+  storage: {
+    dbPath: env("DB_PATH", "./data/binance.sqlite"),
+  },
+
+  risk: {
+    riskPct: num("RISK_PCT", 0.01),
+    // Fixed USDT risk per trade. When > 0 it OVERRIDES riskPct — use it for the
+    // first real-money phase (e.g. RISK_USDT=1 to risk ~1 USDT/trade).
+    riskUsdt: num("RISK_USDT", 0),
+    leverage: num("LEVERAGE", 10),
+    maxOpenPositions: int("MAX_OPEN_POSITIONS", 3),
+    maxDailyLossPct: num("MAX_DAILY_LOSS_PCT", 0.05),
+    takerFee: num("TAKER_FEE", 0.0004),
+    slippageBps: num("SLIPPAGE_BPS", 2),
+    // Hard ceilings (0 = disabled). Belt-and-suspenders caps for live money.
+    maxTradeRiskUsdt: num("MAX_TRADE_RISK_USDT", 0),
+    maxNotionalPerTrade: num("MAX_NOTIONAL_PER_TRADE", 0),
+  },
+
+  strategy: {
+    timeframe: env("TIMEFRAME", "1h"),
+  },
+
+  ops: {
+    // Second key (besides ALLOW_LIVE) required to actually send mainnet orders.
+    confirmLive: bool("CONFIRM_LIVE", false),
+    dashboardPort: int("DASHBOARD_PORT", 8787),
+    backupDir: env("BACKUP_DIR", "./data/backups"),
+  },
+
+  notifications: {
+    telegramToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
+    telegramChatId: process.env.TELEGRAM_CHAT_ID ?? "",
+  },
+
+  universe: {
+    mode: env("UNIVERSE_MODE", "dynamic") as UniverseMode,
+    size: int("UNIVERSE_SIZE", 50),
+    min24hVolume: num("MIN_24H_VOLUME", 50_000_000),
+    symbols: list("SYMBOLS"),
+    denylist: [...DEFAULT_DENYLIST, ...list("DENYLIST")],
+  },
+
+  logLevel: env("LOG_LEVEL", "info"),
+} as const;
