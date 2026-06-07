@@ -56,6 +56,8 @@ export type CloseReason =
   | "STOP" // initial stop hit (full -1R loss)
   | "MANAGED_STOP" // trailing/breakeven stop after partial TP
   | "HEALTH_CLOSE" // trend invalidation or time-stop
+  | "GUARDIAN_STOP" // intra-candle guardian enforced the stop between hourly ticks (live-only)
+  | "REVERSAL_CLOSE" // intra-candle guardian closed on a faster-timeframe trend flip (live-only)
   | "TP3"; // ran to final target
 
 /** A sized, executable/executed trade — the unit stored in the journal. */

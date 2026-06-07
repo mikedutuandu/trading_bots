@@ -44,16 +44,19 @@ export class PaperBroker implements Broker {
 
   async marketReduce(symbol: string, side: Side, qty: number, priceHint: number): Promise<ExecResult> {
     const price = side === "long" ? priceHint * (1 - this.slip) : priceHint * (1 + this.slip);
-    const commission = priceHint * qty * this.takerFee;
     const p = this.positions.get(symbol);
+    // Never reduce more than the open qty — mirrors live reduceOnly, so a stale or
+    // oversized tranche can't over-reduce into a negative position and corrupt equity.
+    const fillQty = p ? Math.min(qty, p.qty) : qty;
+    const commission = priceHint * fillQty * this.takerFee;
     let realized = 0;
     if (p) {
-      realized = side === "long" ? (price - p.entry) * qty : (p.entry - price) * qty;
-      p.qty -= qty;
+      realized = side === "long" ? (price - p.entry) * fillQty : (p.entry - price) * fillQty;
+      p.qty -= fillQty;
       if (p.qty <= 1e-9) this.positions.delete(symbol);
     }
     this.equity += realized - commission;
-    return { price, qty, commission };
+    return { price, qty: fillQty, commission };
   }
 
   async setProtectiveStop(): Promise<string | null> {

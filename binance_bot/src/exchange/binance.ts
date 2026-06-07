@@ -92,8 +92,12 @@ async function request<T>(
   path: string,
   params: Params = {},
   signed = false,
+  opts: { retries?: number; quiet?: boolean } = {},
 ): Promise<T> {
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+  // Best-effort callers (e.g. the dashboard's mark price) can ask for a single quiet
+  // attempt — they re-poll often, so retrying/backing-off/logging just adds lag + noise.
+  const maxRetries = opts.retries ?? MAX_RETRIES;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     let query = buildQuery(params);
     if (signed) {
       // Must be an integer ms epoch; the synced offset can be fractional, so round.
@@ -106,8 +110,8 @@ async function request<T>(
     try {
       res = await rawFetch(method, path, query, signed);
     } catch (err) {
-      logger.warn(`network error on ${path} (attempt ${attempt}):`, err);
-      await sleep(backoff(attempt));
+      if (!opts.quiet) logger.warn(`network error on ${path} (attempt ${attempt}):`, err);
+      if (attempt < maxRetries) await sleep(backoff(attempt));
       continue;
     }
 
@@ -122,7 +126,7 @@ async function request<T>(
     // 418/429 = rate limited, 5xx = transient → retry with backoff
     if (res.status === 429 || res.status === 418 || res.status >= 500) {
       const retryAfter = Number(res.headers.get("retry-after") ?? 0) * 1000;
-      logger.warn(`HTTP ${res.status} on ${path} (attempt ${attempt}): ${body}`);
+      if (!opts.quiet) logger.warn(`HTTP ${res.status} on ${path} (attempt ${attempt}): ${body}`);
       await sleep(Math.max(retryAfter, backoff(attempt)));
       continue;
     }
@@ -138,7 +142,7 @@ async function request<T>(
     }
     throw new BinanceApiError(res.status, code, apiMsg, body, `Binance ${method} ${path} failed: HTTP ${res.status} ${body}`);
   }
-  throw new Error(`Binance ${method} ${path} failed after ${MAX_RETRIES} retries`);
+  throw new Error(`Binance ${method} ${path} failed after ${maxRetries} retries`);
 }
 
 function backoff(attempt: number): number {
@@ -164,8 +168,9 @@ export const binance = {
   getBaseUrl,
   setBaseUrl,
   setCredentials,
-  /** Public (unsigned) GET. */
-  publicGet: <T>(path: string, params?: Params) => request<T>("GET", path, params, false),
+  /** Public (unsigned) GET. `opts` lets best-effort callers limit retries / go quiet. */
+  publicGet: <T>(path: string, params?: Params, opts?: { retries?: number; quiet?: boolean }) =>
+    request<T>("GET", path, params, false, opts),
   /** Signed GET (account/positions). */
   signedGet: <T>(path: string, params?: Params) => request<T>("GET", path, params, true),
   /** Signed POST (place order, set leverage). */
