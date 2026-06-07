@@ -10,6 +10,9 @@ export async function fetchEvents(opts: {
   seriesId?: number;
   closed?: boolean;
   endDateMin?: string; // ISO timestamp; events whose endDate >= this are returned
+  endDateMax?: string; // ISO timestamp; events whose endDate <= this are returned
+  order?: string;      // field to sort by, e.g. "endDate"
+  ascending?: boolean;
   limit?: number;
   offset?: number;
 } = {}): Promise<GammaEvent[]> {
@@ -17,6 +20,9 @@ export async function fetchEvents(opts: {
   if (opts.seriesId !== undefined) params.set("series_id", String(opts.seriesId));
   if (opts.closed !== undefined) params.set("closed", String(opts.closed));
   if (opts.endDateMin) params.set("end_date_min", opts.endDateMin);
+  if (opts.endDateMax) params.set("end_date_max", opts.endDateMax);
+  if (opts.order) params.set("order", opts.order);
+  if (opts.ascending !== undefined) params.set("ascending", String(opts.ascending));
   params.set("limit", String(opts.limit ?? 50));
   if (opts.offset !== undefined) params.set("offset", String(opts.offset));
 
