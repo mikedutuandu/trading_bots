@@ -1,217 +1,202 @@
-# Binance Futures Trading Bot — Design & Build Plan
+# Binance Futures Bot
 
-> Status: **Planning** · Author: Mike + Claude · Date: 2026-06-04
-> Goal: Reproduce (and understand) a profitable systematic long/short Binance
-> USDT-M perpetual futures bot, modeled on a friend's production bot.
+A systematic **Binance USDT-M perpetual futures** bot (long/short, 1h timeframe), reverse-engineered
+from a friend's profitable bot. R-based risk, scaled take-profits + a trailing runner, and an
+intra-minute safety guardian.
+
+> **Status (2026-06):** feature-complete, in **testnet forward-test**. The edge is **marginal and
+> regime-dependent — not yet proven**. Keep live size tiny. See [§7 The honest risk picture](#7-the-honest-risk-picture--read-before-going-live).
+
+This is the single design/status doc. For the day-to-day code map and non-obvious invariants, see
+[CLAUDE.md](CLAUDE.md).
 
 ---
 
-## 1. What the reference bot is (reverse-engineered from its UI)
+## 1. What it is & where the edge comes from
 
-The friend's dashboard (`prod.monngoncuoituan.com/dashboard`) is a **systematic
-multi-symbol Binance USDT-M perpetual futures bot**. Evidence and what each tells us:
-
-| UI signal | What it implies |
-|---|---|
-| "Margin Usage 4.4%", "Position 16.42 USDT", "Funding +0.31" | Leveraged **perpetual futures**, not spot |
-| "Current R", "+2.00R", "−0.86R" | Position sizing & exits are **risk-multiple (R) based** |
-| "TP1 / TP2 / TP3", "BE" badges | **Scaled take-profits** + move stop to **breakeven** |
-| "HEALTH_CLOSE", "MANAGED_STOP", "TP3" close reasons | Multiple exit paths: trend-invalidation, trailing/managed stop, full TP |
-| "trend-pullback", "trend-breakout", "volatility", "intraday" | Several **playbooks** (strategies) run in parallel, each tagged |
-| "Scan Jun 04 10:00 PM", "Coins 60", "1h" | Scans ~**60 symbols** on the **1h** timeframe, ~hourly cadence |
-| "Win Rate 45.6%" but "+25.43 USDT" net | **Edge is payoff asymmetry**, not hit rate (see below) |
-
-### The core edge (most important thing to copy)
+A trend-following bot that **loses often but small, and wins rarely but big**. The edge is **payoff
+asymmetry, not hit rate**:
 
 ```
-Win rate:        45.6%   (loses more often than it wins)
-Avg loser:       ~ -0.75R (capped: stop moves to breakeven after TP1)
-Avg winner:      ~ +1.9R  (lets trend run to TP3)
-Expectancy/trade = 0.456 * (+1.9) - 0.544 * (0.75) ≈ +0.46R  → positive
+Win rate ~50%  ·  avg loss ≈ −1R  ·  avg winner runs to +2R and beyond
+→ expectancy is positive because winners are bigger than losers
 ```
 
-It is **not** a high-accuracy predictor. It's a **trend/pullback follower** that
-keeps losers tiny and lets a minority of winners run. The equity curve confirms
-it: flat-to-down during the choppy days (05/28–06/01), then sharp gains when
-real trends appeared (06/02–06/04). The winning playbook is `trend-pullback`
-(+43.22); `volatility`, `intraday`, `trend-breakout` were net negative over this
-window — i.e. **one playbook carries the book**.
-
-### Honest caveats before copying it
-- **57 closed trades is a tiny sample.** +7% in 7 days is not yet evidence of edge.
-- Recent trades are almost all SHORT → it may just be riding one market regime.
-- Survivorship/recency bias: we see it *after* a good week. We have no drawdown history.
-- **Do not skip backtesting on the assumption "it makes money."**
+It runs **one playbook: `trend-pullback`** (enter on a pullback within an established trend). The
+reference bot ran several playbooks but one carried the book; our backtests confirmed `trend-breakout`
+is net-negative and *crowds out* pullback's good trades, so it stays disabled.
 
 ---
 
-## 2. Recommended architecture
+## 2. Status & current config
 
-Mirror the existing `poli_bot` conventions: **TypeScript (ESM), `tsx`, `better-sqlite3`,
-`zod`, `dotenv`**, modular `src/` folders. Build it in **phases** — same as poli_bot
-started with data collection.
+Built end-to-end (data → backtest → testnet → live plumbing) and tuned via a 2026-06 walk-forward grid.
+The current `.env` config:
 
-```
-binance_bot/
-  src/
-    config.ts            # env + zod-validated config, per-playbook params
-    logger.ts            # structured logging (copy poli_bot)
-    types.ts             # Candle, Signal, Trade, Position, Playbook enums
-    exchange/
-      binance.ts         # REST + WS wrapper (ccxt or native) — testnet aware
-      marketData.ts      # klines fetch, funding, mark price, symbol filters
-      account.ts         # balance, positions, leverage, margin
-    storage/
-      db.ts              # sqlite schema + migrations
-      candles.ts         # OHLCV cache
-      trades.ts          # trade journal (entry/exit/R/fees/funding)
-    indicators/
-      ta.ts              # EMA, ATR, RSI, ADX, swing highs/lows, donchian
-    universe/
-      scanner.ts         # pick tradable symbols (volume, volatility filters)
-    playbooks/
-      types.ts           # Playbook interface: detect(candles, ctx) -> Signal|null
-      trendPullback.ts   # the money-maker — build first
-      trendBreakout.ts
-      volatility.ts      # build later / optional
-    risk/
-      sizing.ts          # R-based position sizing from stop distance
-      manage.ts          # TP1/2/3, breakeven, managed/health stops
-    engine/
-      loop.ts            # scan -> signal -> size -> execute -> manage
-      paperBroker.ts     # simulated fills for paper trading
-      liveBroker.ts      # real Binance orders (guarded behind flags)
-    backtest/
-      runner.ts          # replay candles, simulate fills, fees, funding
-      metrics.ts         # win rate, expectancy, maxDD, Sharpe, per-playbook
-    notifications/
-      telegram.ts        # trade/error alerts (optional)
-    scripts/
-      collect.ts         # download + cache klines (PHASE 1)
-      backtest.ts        # run a playbook over history (PHASE 2)
-      paper.ts           # live paper trading (PHASE 3)
-      live.ts            # real trading, tiny size (PHASE 4)
-  data/                  # sqlite db + downloaded klines
-  .env / .env.example
-  package.json
-```
-
-### Tech choices
-- **Exchange lib:** **Native Binance USDT-M Futures API** (`fapi` REST + WS) — chosen
-  for full control and no abstraction layer. We'll write a thin typed wrapper in
-  `exchange/binance.ts`: signed REST (HMAC-SHA256), klines/funding/mark-price reads,
-  and order endpoints. Implications to handle ourselves (ccxt would have hidden these):
-  - **Auth:** HMAC-SHA256 signing of query strings, `recvWindow`, server-time sync.
-  - **Symbol filters:** parse `exchangeInfo` for tickSize / stepSize / minNotional and
-    round prices & quantities before sending (else `-1111`/`-2010` rejects).
-  - **Rate limits:** track `X-MBX-USED-WEIGHT`; cache klines hard (cheap on 1h bars).
-  - **Testnet:** different base URLs (`testnet.binancefuture.com`) — make base URL configurable.
-  - **WS:** user-data stream (listenKey + keepalive) for fills, and mark-price/kline streams.
-- **DB:** `better-sqlite3` (same as poli_bot) — synchronous, simple, perfect for this.
-- **Why TS:** reuse poli_bot patterns, your familiarity, strong typing for money code.
+| Knob | Value | Why |
+|---|---|---|
+| `TAKE1` / `TAKE2` | `0.3` / `0.3` | take 0.3 at +1R, 0.3 at +2R, **trail the last 0.4** |
+| `TRAIL_MULT` | `3` | runner trails 3×ATR behind the peak (2× backtested worse) |
+| `ADX_MIN` | `25` | trend-strength gate (skip chop) |
+| `COOLDOWN` | `24` | bars to wait per symbol after a close |
+| `MAX_OPEN_POSITIONS` | `4` | caps correlated exposure — the **biggest risk lever** (see §6) |
+| `RISK_PCT` / `RISK_USDT` | `1%` / `0` | risk per trade (set `RISK_USDT=1` for the first real-money phase) |
+| `LEVERAGE` | `10` | risk is set by the stop, not leverage; keep margin usage low |
+| `MAX_DAILY_LOSS_PCT` | `0.05` | kill switch — **halts new entries** past −5% on the day |
+| lifecycle timeouts | `0` (off) | the guardian + trend-flip close retire stale trades instead |
+| `MONITOR_ENABLED` | `true` | the intra-minute guardian (§4) |
+| `MONITOR_INTERVAL_MIN` | `1` | guardian checks open positions every minute |
+| `MONITOR_REVERSAL_MODE` | `exit` | auto-close on a 15m reversal (`off` / `warn` / `exit`) |
+| `MONITOR_REVERSAL_TF` | `15m` | timeframe for the reversal check |
 
 ---
 
-## 3. Strategy: the `trend-pullback` playbook (build this first)
+## 3. The strategy & exit model
 
-This is the one that makes money in the reference bot. Concrete, testable rules
-(tune in backtest — these are sensible starting defaults):
+### Entry — `trend-pullback`
+- **Trend:** EMA50 vs EMA200 on the 1h. Long only in an uptrend, short only in a downtrend.
+- **Gate:** `ADX(14) ≥ 25` (avoid sideways chop).
+- **Trigger:** price pulls back to EMA20 and reclaims it with a reversal candle in the trend direction.
+- **Stop:** `entry ∓ 1.5×ATR(14)`. That entry-to-stop distance **is 1R** — the unit everything is measured in.
 
-**Context filter (per symbol, 1h):**
-- Trend = EMA(50) vs EMA(200): `up` if EMA50 > EMA200, `down` if below.
-- Only take trades in the trend direction (long in uptrend, short in downtrend).
-- Optional strength gate: `ADX(14) >= 20` to avoid chop (this is what kills the
-  bot in ranging markets — worth testing).
-
-**Entry (long example; mirror for short):**
-- Price pulls back to EMA(20) or a recent swing/Fib zone while trend stays up.
-- Trigger: bullish reversal candle (e.g. close back above EMA20, or RSI(14)
-  crosses up from <40) → enter long.
-
-**Stop & risk:**
-- Initial stop = `entry − k * ATR(14)` (k ≈ 1.5), or just beyond the pullback swing low.
-- `1R = entry − stop` (the risk per unit).
-- Size so that **risk per trade = fixed % of equity** (start 0.5–1.0%, the ref bot
-  risks tiny amounts: ~16–85 USDT position on ~370 equity).
-
-**Exits (this is where the edge lives):**
-- **TP1** at +1R → take 1/3 off, **move stop to breakeven** (now max loss ≈ 0).
-- **TP2** at +2R → take 1/3 off.
-- **TP3** at +3R (or trail the rest with a chandelier/ATR trail) → close remainder.
-- **HEALTH_CLOSE**: exit if trend flips (EMA50 crosses EMA200 against you) or a time
-  stop (e.g. N bars with no progress).
-- **MANAGED_STOP**: the trailing stop after breakeven.
-
-> The breakeven move after TP1 is the single mechanic that produces the
-> "lose-often-still-profit" curve. Implement and test it carefully.
-
-`trend-breakout` (Donchian/range breakout + retest) and `volatility` can come later;
-they were net-negative in the reference window, so **don't prioritize them.**
-
----
-
-## 4. Risk management (the part that keeps you solvent)
-
-- **Risk per trade:** fixed fraction of equity (start 0.5%). `qty = (equity * risk%) / (1R per unit)`.
-- **Leverage:** set per symbol only high enough to hold the position; keep **margin
-  usage low** (ref bot sits at 4.4%). Leverage ≠ risk here — the stop defines risk.
-- **Max concurrent positions:** cap (ref bot ran 3 open). Start with 2–3.
-- **Max daily loss / kill switch:** halt new entries if equity draws down X% in a day.
-- **Correlation guard:** don't take 5 longs on coins that all move together.
-- **Account for fees + funding** in every PnL calc (ref bot: commission was −10.59 on
-  +35.71 gross — **fees ate ~30% of gross**; on 1h trades this matters a lot).
-
----
-
-## 5. Phased build plan
-
-| Phase | Goal | Deliverable | Real money? |
+### Exit — the scaled ladder (where the edge lives)
+| Stage | Trigger | Action | Stop moves to |
 |---|---|---|---|
-| **0. Scaffold** | Project setup | `package.json`, config, db schema, types | No |
-| **1. Data** | Reliable history | `collect.ts` downloads + caches 1h klines for ~60 symbols; funding history | No |
-| **2. Backtest** | Prove the edge | `backtest.ts` runs `trend-pullback` over 1–2y; reports win%, expectancy, maxDD, **net of fees+funding**, per-playbook | No |
-| **3. Paper** | Validate live plumbing | `paper.ts` runs the full loop on live data with simulated fills for 2–4 weeks; compare to backtest | No |
-| **4. Live (tiny)** | Real edge check | `live.ts` on **Binance testnet first**, then real money at **minimum size** (e.g. risk $1–2/trade) | Yes, tiny |
-| **5. Scale & dashboard** | Operate | Add the dashboard (Next.js, like the ref UI), alerts, scale risk slowly | Yes |
+| **TP1** | +1R | sell 0.3 | **breakeven** (capital safe) |
+| **TP2** | +2R | sell 0.3 | **+1R** (profit locked) + arm the trail |
+| **Runner** | — | last 0.4 **trails** | chandelier: `peak ∓ 3×ATR`, ratchets one way only |
 
-**Gate between phases:** do not advance until the prior phase's numbers are good.
-Backtest expectancy must be clearly positive *after fees* before any live capital.
+So a typical winner: `0.3×(+1R) + 0.3×(+2R) + 0.4×(runner)`. Once TP2 hits, the runner can only win
+between +1R and +∞. A trade that hits TP1 then fades back banks **+0.3R** (not 0). A trade stopped
+before TP1 loses **−1R**.
 
----
-
-## 6. Binance specifics & gotchas
-- Use **USDT-M Futures** (`fapi`), **one-way** position mode to start (simpler than hedge mode).
-- **Test on Binance Futures testnet** first — full order flow without risk.
-- Respect **symbol filters**: tick size, step size, min notional. ccxt exposes these;
-  round prices/qty or orders get rejected.
-- **Rate limits**: batch klines, cache aggressively (we're on 1h bars — cheap).
-- **API key perms**: enable Futures trading, **disable withdrawals**, IP-whitelist the key.
-- **Funding** is paid/received every 8h on perps — include in PnL and in hold-cost logic.
-- **Geo/legal**: Binance access varies by jurisdiction — confirm yours.
+Other exits: **HEALTH_CLOSE** (1h trend flips against the position), **STOP** / **MANAGED_STOP** (the
+protective/trailing stop).
 
 ---
 
-## 7. Decisions made & open questions
-**Decided:**
-- **Exchange lib:** Native Binance USDT-M Futures API (no ccxt) — see §2.
-- **Strategy source:** **Reverse-engineer** from the UI. We do *not* have the friend's
-  exact rules, so the `trend-pullback` rules in §3 are our own hypotheses to be
-  validated/tuned in backtest. Treat every parameter (EMA periods, ATR k, ADX gate,
-  TP levels) as a knob, not gospel.
+## 4. The guardian (intra-minute safety) — live-only
 
-**Still open:**
-1. **How much capital** for the live phase? (Sets risk-per-trade sizing.)
-2. **Symbol universe:** which ~60 USDT-M perps? Start from top-volume liquid majors.
-3. **Backtest data source:** Binance free historical klines (`data.binance.vision`) is best.
+The TP ladder above runs **once per hour** on candle close (the backtest-faithful path). Between those
+ticks, a fast **guardian** checks every open position **every minute**:
+
+- **Layer A — enforce the stop on the live price.** If the mark has crossed `pos.stop`, close
+  immediately (`GUARDIAN_STOP`) instead of waiting up to an hour. This fixes the gap on the demo venue,
+  which rejects resting stop orders — so without it, price can blow past the stop unprotected.
+- **Layer B — exit on a faster-timeframe reversal.** If the **15m** EMA50/EMA200 flips against a
+  *not-yet-locked* position (`!tp2Hit`), auto-close it (`REVERSAL_CLOSE`) and Telegram an alert. It never
+  cuts a locked, trailing runner. Modes: `off` / `warn` (alert only) / `exit` (auto-close).
+
+One process, one loop — the hourly tick and the guardian never run concurrently, so there's no
+DB contention. **Layer A is backtest-neutral** (the backtest already assumes intra-candle stops);
+**Layer B is a deliberate live-only overlay** the 1h backtest can't model, journalled with its own close
+reasons so its impact can be measured.
 
 ---
 
-## 8. Immediate next step
-Scaffold Phase 0 + Phase 1 (data collection) so we can start pulling history and
-**backtest the `trend-pullback` playbook**. Everything downstream depends on
-proving the edge on real data first.
-```
+## 5. Commands
 
-# build the data collector → backtest trend-pullback → review numbers
-```
-```
+| Command | Purpose | DB |
+|---|---|---|
+| `npm run collect` | Download/cache 1h klines for the universe | `binance.sqlite` |
+| `npm run collect-funding` | Download 8h funding history (accurate backtest costs) | `binance.sqlite` |
+| `npm run backtest` | Replay candles through the engine; win%, expectancy, PF, maxDD, net of fees. `TRAIN_END=YYYY-MM-DD` → walk-forward | `binance.sqlite` |
+| `npm run optimize` | Walk-forward grid search (select on TRAIN, report TEST) | `binance.sqlite` |
+| `npm run testnet` | **Forward-test** — live engine on the demo venue: hourly tick + 1-min guardian | `testnet.sqlite` |
+| `npm run live` | Real money (mainnet). Refuses unless `ALLOW_LIVE=true` **and** `CONFIRM_LIVE=true` | `live.sqlite` |
+| `npm run dashboard:testnet` / `:live` | Read-only ops dashboard (localhost:8787 / :8788) | testnet / live |
+| `npm run account` / `flatten` | Print balances+positions / emergency close-all | testnet / live |
+| `npm run typecheck` | `tsc --noEmit` — the only static gate (no test runner) | — |
+| `npx tsx src/scripts/check-manage.ts` | Deterministic assertions for the exit engine (TP/stop/trail math) | — |
+| `npx tsx src/scripts/check-ta.ts` | Sanity-check the indicators against hand calcs | — |
+
+Engine env flags (prefix a `testnet`/`live` run): `RUN_NOW=true`, `ONESHOT=true`, `DRY_RUN=true` (use a
+throwaway `DB_PATH`!), `NO_STREAM=true`.
+
+---
+
+## 6. Architecture (brief)
+
+The decisive rule: **one shared logic path** — the pure decision functions are used verbatim by the
+backtest, testnet, and live. Change exit/sizing/signal logic in the shared functions, never duplicate it.
+
+- `playbooks/trendPullback.ts` — `detect()` entry signals
+- `risk/sizing.ts` — `sizePosition()` (R-based) + `splitTranches()` (step-rounded TP fractions)
+- `risk/manage.ts` — `manageOnCandle()`, the TP ladder / breakeven / trail / health-close machine
+- `backtest/runner.ts` — vectorized replay; `engine/loop.ts` — the live engine (calls the *same* functions)
+- `engine/loop.ts` — `runScheduled` (dual cadence), `monitorOpenPositions` (the guardian)
+- `engine/{liveBroker,paperBroker}.ts` — execution behind one `Broker` interface (venue chosen by the npm command)
+
+Stack: Node ≥20, ESM, TypeScript via `tsx` (no build step). `better-sqlite3` (three DBs: `binance` =
+research, `testnet`, `live`). Config flows `env → config.ts → typed config`. Deep invariants live in
+[CLAUDE.md](CLAUDE.md).
+
+---
+
+## 7. The honest risk picture — read before going live
+
+**This is the most important section.** A 2026-06 walk-forward grid (train Dec'24–Dec'25, OOS Jan–Jun'26)
+found:
+
+- **Every TP config loses ~90% IN-SAMPLE** (PF ~0.81). The positive returns exist *only* in the recent
+  out-of-sample window. **The edge is regime-dependent, not validated** — the backtest is a "don't be
+  reckless" light, not a green light.
+- **`MAX_OPEN_POSITIONS` was the biggest lever** — the −90% was largely *position-stacking* (10 correlated
+  bets compounding in a bad regime). Cutting it to **4** turned the worst case to **−34%** in-sample *and*
+  raised OOS profit factor 1.09 → 1.21.
+
+| config (OOS Jan–Jun'26) | win | PF | return | maxDD |
+|---|---|---|---|---|
+| old: `0/0.5`, maxOpen 10 | 28% | 1.13 | +197% | 42% |
+| **current: `0.3/0.3`, maxOpen 4** | **53%** | **1.21** | **+119%** | **26%** |
+
+**What "safe" does and doesn't mean here:**
+- **Realized loss is ~1.1–1.3R, not exactly 1R** — slippage widens the stop distance from the fill, and
+  taker fees are a real fraction of R on tight stops (the backtest models both — it's the cost reality).
+- **The kill switch caps *new entries*, not *loss*.** With 4 open positions each able to ride to −1R, a
+  bad day can exceed the 5% "cap". It's an entry gate, not a hard stop on the day.
+- **On the demo venue the guardian is the *only* stop enforcer**, so a fast gap between 1-min checks fills
+  worse than 1R. On mainnet the resting exchange stop covers this.
+- **The live journal omits funding** on multi-day runners (equity is correct; per-trade R reads slightly
+  optimistic).
+
+**Discipline:** forward-test on testnet first; go to mainnet only with `RISK_USDT=1`; scale only after a
+few dozen real trades confirm a positive, stable edge — and be willing to walk away if it isn't there.
+
+---
+
+## 8. How it was built (milestones — all done)
+
+Built in gated phases; each gate had to pass before advancing. Summary:
+
+| M | Step | Gate |
+|---|---|---|
+| M0 | Scaffold (config, types, logger) | typecheck passes |
+| M1 | Exchange read layer (klines, exchangeInfo, funding) | fetch BTC candles |
+| M2 | Storage (SQLite + `collect`) | 1y data, ~50 coins, idempotent |
+| M3 | Indicators (EMA/ATR/ADX/Donchian) | match hand calcs |
+| M4 | Strategy (`trend-pullback`) | sensible signals |
+| M5 | Risk: sizing + `manageOnCandle` | qty/margin correct |
+| **M6** | **Backtest engine** ⭐ | **+EV after fees, out-of-sample** |
+| M7 | Live on testnet (forward-test) | full lifecycle OK; live ≈ backtest |
+| M8 | Live real money, tiny size | real +EV → scale |
+| M9 | Dashboard + ops (alerts, backups) | observable |
+
+**2026-06 improvements** (on top of M0–M9): restructured take-profits to `0.3/0.3` + trailing runner,
+removed the lifecycle timeouts, added the intra-minute guardian, and cut `MAX_OPEN_POSITIONS` 10 → 4. The
+exit engine is covered by deterministic assertions (`check-manage.ts`, 20/20) and was reviewed
+adversarially (one real bug fixed: a mid-tick broker error could leave a stale DB and let the guardian cut
+a locked runner — the decided state is now persisted before the fills execute).
+
+---
+
+## 9. Binance specifics & gotchas
+- **USDT-M Futures** (`fapi`), **one-way** position mode (enforced at startup).
+- The **demo/testnet venue** (`demo-fapi.binance.com`) rejects resting `STOP_MARKET` orders — hence the
+  guardian. Its prices are the demo market's own (won't match mainnet).
+- Conditional orders (STOP/TP) moved to the **Algo endpoint** (`/fapi/v1/algoOrder`) in 2025-12 — affects
+  mainnet too.
+- **Round prices to tick / qty to step** before sending (`roundToTick`/`roundToStep`) or orders reject.
+- **Funding** settles every 8h on perps — modeled in backtest/paper; the exchange charges it directly on live.
+- **API keys:** enable Futures, **disable withdrawals**, IP-whitelist. Mainnet `live` needs two flags
+  (`ALLOW_LIVE` + `CONFIRM_LIVE`) plus a countdown.

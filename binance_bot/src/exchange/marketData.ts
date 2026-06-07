@@ -127,6 +127,23 @@ export async function getSymbolFilter(symbol: string): Promise<SymbolFilter> {
 
 // ─── Funding / mark price ────────────────────────────────────────────────────
 
+/**
+ * ALL mark prices in ONE call (premiumIndex with no symbol → array). Best-effort &
+ * quiet (single attempt, no retry/backoff/warn) — for the dashboard, which re-polls
+ * every few seconds, so a transient failure just yields no marks this tick instead of
+ * retrying, blocking the render, and spamming warnings.
+ */
+export async function getMarkPrices(): Promise<Map<string, number>> {
+  const rows = await binance.publicGet<Array<{ symbol: string; markPrice: string }>>(
+    "/fapi/v1/premiumIndex",
+    undefined,
+    { retries: 1, quiet: true },
+  );
+  const out = new Map<string, number>();
+  for (const r of rows) out.set(r.symbol, Number(r.markPrice));
+  return out;
+}
+
 export async function getMarkPrice(
   symbol: string,
 ): Promise<{ markPrice: number; lastFundingRate: number; nextFundingTime: number }> {

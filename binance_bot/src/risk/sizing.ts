@@ -19,6 +19,38 @@ export function roundToTick(price: number, tick: number): number {
   return Number(rounded.toFixed(decimals));
 }
 
+/**
+ * Split a (step-rounded) total position into TP1/TP2 tranches, each rounded to the
+ * exchange step size, with the trailing runner taking the residual
+ * (qtyTotal − qtyTp1 − qtyTp2). Rounding here — rather than sending a raw fraction —
+ * keeps live reduceOnly orders off the -1111/-2010 precision rejects AND keeps the
+ * backtest/paper tranche sizes identical to what live actually executes. SHARED by
+ * the backtest (runner.ts) and the live engine (loop.ts) so they can't drift.
+ *
+ * A tranche that rounds below one step → 0; the `qtyTp1 > 0` / `qtyTp2 > 0` guards in
+ * manageOnCandle then skip that partial instead of sending a 0-qty order (which
+ * placeMarketOrder rejects). So a position too small to split just rides to the trail.
+ */
+export function splitTranches(
+  qtyTotal: number,
+  takeFrac1: number,
+  takeFrac2: number,
+  stepSize: number,
+): { qtyTp1: number; qtyTp2: number } {
+  // Round each tranche DOWN to step; clamp so qtyTp1 + qtyTp2 can NEVER exceed
+  // qtyTotal → the trailing runner residual (qtyTotal − qtyTp1 − qtyTp2) is always
+  // ≥ 0, even if the configured fractions are nonsensical (e.g. sum > 1 or > 1 each).
+  // This bounds what manageOnCandle subtracts from qtyRemaining, so it can't go
+  // negative. A tranche below one step → 0; the `qtyTp1 > 0` / `qtyTp2 > 0` guards in
+  // manageOnCandle then skip that partial instead of sending a 0-qty order (which
+  // placeMarketOrder rejects). (Identical output to a raw split for any valid
+  // fractions summing ≤ 1; the clamps only bite on misconfiguration.)
+  const qtyTp1 = Math.min(qtyTotal, Math.max(0, roundToStep(qtyTotal * takeFrac1, stepSize)));
+  const remainder = Math.max(0, roundToStep(qtyTotal - qtyTp1, stepSize));
+  const qtyTp2 = Math.min(remainder, Math.max(0, roundToStep(qtyTotal * takeFrac2, stepSize)));
+  return { qtyTp1, qtyTp2 };
+}
+
 export interface SizedPosition {
   qty: number;
   notional: number;

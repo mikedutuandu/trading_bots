@@ -6,7 +6,7 @@ import { getExchangeInfo } from "../exchange/marketData.js";
 import type { Candle, Trade } from "../types.js";
 import { computeIndicators } from "../playbooks/index.js";
 import type { IndicatorCtx, Playbook, StrategyParams } from "../playbooks/types.js";
-import { sizePosition } from "../risk/sizing.js";
+import { sizePosition, splitTranches } from "../risk/sizing.js";
 import { closeReasonOf, manageOnCandle, type RuntimePosition } from "../risk/manage.js";
 
 export interface BacktestConfig {
@@ -249,6 +249,13 @@ export async function runBacktest(cfg: BacktestConfig): Promise<BacktestResult> 
         const entryFee = sized.entry * sized.qty * cfg.takerFee;
         equity -= entryFee;
 
+        // Step-rounded TP tranches (shared with the live engine for parity).
+        const { qtyTp1, qtyTp2 } = splitTranches(
+          sized.qty,
+          cfg.params.takeFrac1,
+          cfg.params.takeFrac2,
+          filter.stepSize,
+        );
         const pos: RuntimePosition = {
           side: signal.side,
           entry: entryEff,
@@ -258,8 +265,8 @@ export async function runBacktest(cfg: BacktestConfig): Promise<BacktestResult> 
           tp3: sized.tp3,
           qtyTotal: sized.qty,
           qtyRemaining: sized.qty,
-          qtyTp1: sized.qty * cfg.params.takeFrac1,
-          qtyTp2: sized.qty * cfg.params.takeFrac2,
+          qtyTp1,
+          qtyTp2,
           tp1Hit: false,
           tp2Hit: false,
           trailActive: false,

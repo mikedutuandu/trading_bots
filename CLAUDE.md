@@ -7,7 +7,7 @@ This repo is a **workspace of two independent trading bots**. They share no code
 | Directory | Bot | Read first |
 |---|---|---|
 | [poli_bot/](poli_bot/) | Polymarket **BTC 5m up/down** prediction-market bot. Buy-only; Black-Scholes fair value blended with the market, quarter-Kelly sizing; positions resolve at window close. Live. | [poli_bot/CLAUDE.md](poli_bot/CLAUDE.md), [poli_bot/DOCS.md](poli_bot/DOCS.md) |
-| [binance_bot/](binance_bot/) | Binance **USDT-M perpetual futures** long/short bot. R-based risk, `trend-pullback` only; TP ladder + trailing exit. Reverse-engineered, marginal edge, in testnet forward-test. | [binance_bot/CLAUDE.md](binance_bot/CLAUDE.md), [binance_bot/BUILD_PLAN.md](binance_bot/BUILD_PLAN.md), [binance_bot/README.md](binance_bot/README.md) |
+| [binance_bot/](binance_bot/) | Binance **USDT-M perpetual futures** long/short bot. R-based risk, `trend-pullback` only; TP ladder + trailing exit. Reverse-engineered, marginal edge, in testnet forward-test. | [binance_bot/CLAUDE.md](binance_bot/CLAUDE.md), [binance_bot/README.md](binance_bot/README.md) |
 
 The per-bot `CLAUDE.md` files are the source of truth for that bot's commands, architecture, and the non-obvious invariants (execution model, restart-safety, DB roles, exchange quirks). Defer to them — this file only covers what the two have in common.
 

@@ -35,6 +35,14 @@ function list(key: string): string[] {
     .filter(Boolean);
 }
 
+export type MonitorReversalMode = "off" | "warn" | "exit";
+
+function monitorMode(): MonitorReversalMode {
+  const v = (process.env.MONITOR_REVERSAL_MODE ?? "warn").toLowerCase().trim();
+  if (v === "off" || v === "warn" || v === "exit") return v;
+  throw new Error(`Invalid MONITOR_REVERSAL_MODE: ${v} (expected off | warn | exit)`);
+}
+
 export type Mode = "backtest" | "paper" | "live";
 export type UniverseMode = "dynamic" | "static";
 
@@ -94,6 +102,15 @@ export const config = {
 
   strategy: {
     timeframe: env("TIMEFRAME", "1h"),
+  },
+
+  // Intra-candle guardian: a fast loop that checks open positions between the
+  // hourly ticks (live-only safety overlay — NOT modelled by the backtest).
+  monitor: {
+    enabled: bool("MONITOR_ENABLED", true),
+    intervalMin: num("MONITOR_INTERVAL_MIN", 1), // how often to check open positions (minutes)
+    reversalMode: monitorMode(), // off | warn | exit — what to do on a faster-TF trend flip
+    reversalTf: env("MONITOR_REVERSAL_TF", "15m"), // timeframe for the EMA50/EMA200 reversal check
   },
 
   ops: {
