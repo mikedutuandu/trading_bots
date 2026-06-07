@@ -224,10 +224,12 @@ async function tick() {
     s.byPlaybook.map(p => '<tr><td>'+p.playbook+'</td><td>'+p.trades+'</td><td>'+pct(p.winRate)+'</td>'
       +'<td class="'+sign(p.netPnl)+'">'+usd(p.netPnl)+'</td></tr>'));
 
-  table('closed', ['Symbol','Side','Playbook','Reason','R','Net PnL','Closed'],
+  table('closed', ['Symbol','Side','Playbook','Reason','R','Net PnL','Duration','Closed'],
     s.recentClosed.map(t => '<tr><td>'+t.symbol+'</td><td>'+t.side+'</td><td><span class="tag">'+t.playbook+'</span></td>'
       +'<td class="muted">'+(t.closeReason||'—')+'</td><td class="'+sign(t.rRealized||0)+'">'+(t.rRealized==null?'—':t.rRealized.toFixed(2)+'R')+'</td>'
-      +'<td class="'+sign(t.netPnl||0)+'">'+usd(t.netPnl)+'</td><td class="muted">'+tdate(t.closedAt)+'</td></tr>'));
+      +'<td class="'+sign(t.netPnl||0)+'">'+usd(t.netPnl)+'</td>'
+      +'<td class="muted">'+((t.openedAt&&t.closedAt)?dur(t.closedAt-t.openedAt):'—')+'</td>'
+      +'<td class="muted">'+tdate(t.closedAt)+'</td></tr>'));
 }
 renderFilters(); tick(); setInterval(tick, 5000);
 </script>
