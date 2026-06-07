@@ -390,6 +390,16 @@ async function main(): Promise<void> {
     const btc = feed.getLast();
     if (!event || !btc.price || state.windowOpenBtcPrice === null) return;
 
+    // Staleness guard: if the feed froze (WS dropped mid-reconnect, or RTDS stopped
+    // publishing), don't price/trade off a dead spot. As remainingSec->0, sigma*sqrt(T)->0
+    // and a stale spot even slightly off strike drives pUp toward 0/1 — a fake high-edge
+    // signal at the worst possible moment. Skip until a fresh tick arrives.
+    const tickAgeMs = now - btc.ts;
+    if (tickAgeMs > config.collector.maxTickAgeMs) {
+      logger.debug("Skipping tick — stale BTC feed", { ageMs: tickAgeMs, maxMs: config.collector.maxTickAgeMs });
+      return;
+    }
+
     const annualVol = vol.annualizedVol();
     if (annualVol === null) return;
     const drift = vol.annualizedDrift();

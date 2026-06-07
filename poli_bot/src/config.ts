@@ -54,6 +54,10 @@ export const config = {
     settlementPollAttempts: int("SETTLEMENT_POLL_ATTEMPTS", 30),
     polymarketMinShares: int("POLYMARKET_MIN_SHARES", 5),
     liveSizeCapTolerance: num("LIVE_SIZE_CAP_TOLERANCE", 1.5),
+    // Reject a tick if the BTC feed hasn't updated in this long — a frozen spot near
+    // window close manufactures a fake edge (sigma*sqrt(T)->0 as T->0). Default 30s
+    // (6 tick intervals); raise if the feed is legitimately quiet during flat periods.
+    maxTickAgeMs: int("MAX_TICK_AGE_MS", 30_000),
     logLevel: env("LOG_LEVEL", "info"),
   },
   paperEnabled: bool("PAPER_ENABLED", true),

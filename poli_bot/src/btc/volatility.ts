@@ -47,9 +47,15 @@ export class RollingRealizedVol {
     if (this.minuteCloses.length < 3) return null;
     const returns: number[] = [];
     for (let i = 1; i < this.minuteCloses.length; i++) {
-      const a = this.minuteCloses[i - 1]!.close;
-      const b = this.minuteCloses[i]!.close;
-      if (a > 0 && b > 0) returns.push(Math.log(b / a));
+      const prev = this.minuteCloses[i - 1]!;
+      const cur = this.minuteCloses[i]!;
+      // Only use returns between CONSECUTIVE minutes. A feed gap (WS reconnect, missed
+      // minutes) otherwise collapses a multi-minute move into a single "1-minute" return
+      // which annualizedVol() then scales by sqrt(525600) as if it spanned one minute —
+      // spiking vol ~sqrt(gap)x. High sigma widens the fair-value distribution and pulls
+      // pUp toward 0.5, manufacturing a fake edge. Skip non-contiguous pairs.
+      if (cur.minute - prev.minute !== 1) continue;
+      if (prev.close > 0 && cur.close > 0) returns.push(Math.log(cur.close / prev.close));
     }
     if (returns.length < 2) return null;
     const mean = returns.reduce((s, x) => s + x, 0) / returns.length;

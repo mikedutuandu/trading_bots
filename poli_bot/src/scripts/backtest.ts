@@ -16,7 +16,11 @@ import { RollingRealizedVol } from "../btc/volatility.js";
 const STRATEGY = {
   ...config.strategy,
   maxRiskFraction: config.risk.maxRiskPerTradeUsd / config.strategy.bankrollUsd,
-  takerFee: 0.02,
+  // Polymarket charges no taker fee (confirmed: live_trades.fees_usd is always 0), and the
+  // live settlement path books feesUsd: 0. The old 0.02 here made the backtest pessimistic
+  // on fees while it was optimistic on resolution/fills — a confusing mismatch. Keep it 0
+  // so the backtest's per-trade economics match what live actually pays.
+  takerFee: 0,
 } as const;
 
 interface TickRow {
@@ -49,7 +53,8 @@ interface SimTrade {
   slug: string;
   side: "UP" | "DOWN";
   takerPrice: number;
-  riskUsd: number;
+  shares: number;       // actual shares after the 5-share minimum / rounding (matches live)
+  riskUsd: number;      // actual USD at risk = shares * takerPrice (matches live)
   edge: number;
   fairValueUp: number;
 }
@@ -123,68 +128,64 @@ function main(): void {
       maxRiskFraction: STRATEGY.maxRiskFraction,
       kellyFraction: STRATEGY.kellyFraction,
     });
-    if (riskUsd < 1) continue;
+    if (riskUsd <= 1) continue;
+    // Apply the SAME live sizing the real-money path uses (main.ts:463-472): cap at
+    // LIVE_MAX_TRADE_USD, enforce Polymarket's 5-share minimum, then reject if that bump
+    // would overshoot the cap * tolerance. Without this the backtest trades a finer,
+    // uncapped, idealized position set that live can never place — inflating ROI.
+    const cappedRiskUsd = Math.min(riskUsd, config.live.maxTradeUsd);
+    const rawShares = cappedRiskUsd / decision.takerPrice;
+    const shares = Math.max(config.collector.polymarketMinShares, Math.ceil(rawShares * 100) / 100);
+    const actualRiskUsd = shares * decision.takerPrice;
+    if (actualRiskUsd > config.live.maxTradeUsd * config.collector.liveSizeCapTolerance) continue;
     trades.push({
       windowEndMs: t.window_end_ms,
       slug: t.market_slug,
       side: decision.side,
       takerPrice: decision.takerPrice,
-      riskUsd,
+      shares,
+      riskUsd: actualRiskUsd,
       edge: decision.edge,
       fairValueUp: fv.pUp,
     });
     tradedWindows.add(t.window_end_ms);
   }
 
-  // Resolve against Polymarket's outcome when available; fall back to Binance guess otherwise.
+  // Resolve ONLY against Polymarket's authoritative (Chainlink-settled) outcome. The old
+  // code fell back to the bot's own Binance guess (outcome_up) when the Polymarket value was
+  // missing — but that guess is derived from the SAME feed/strike the signal traded on, so it
+  // graded the bot with its own answer key and inflated the win rate. Windows lacking a
+  // Polymarket outcome are now skipped (and counted), so coverage is honest.
   let wins = 0;
   let totalPnl = 0;
   let totalRisk = 0;
   let resolvedFromPolymarket = 0;
-  let resolvedFromBinance = 0;
-  let disagreements = 0;
   const skippedNoOutcome: string[] = [];
   for (const tr of trades) {
     const o = outcomes.get(Math.floor(tr.windowEndMs / 1000));
-    if (!o) { skippedNoOutcome.push(tr.slug); continue; }
-
-    let upWon: boolean | null = null;
-    let source: "polymarket" | "binance" = "binance";
-    if (o.polymarket_outcome_up !== null && o.polymarket_outcome_up !== undefined) {
-      upWon = o.polymarket_outcome_up === 1;
-      source = "polymarket";
-    } else if (o.outcome_up !== null) {
-      upWon = o.outcome_up === 1;
-      source = "binance";
+    if (!o || o.polymarket_outcome_up === null || o.polymarket_outcome_up === undefined) {
+      skippedNoOutcome.push(tr.slug);
+      continue;
     }
-    if (upWon === null) { skippedNoOutcome.push(tr.slug); continue; }
-    if (source === "polymarket") resolvedFromPolymarket++; else resolvedFromBinance++;
-
-    // Track when the two sources disagree
-    if (o.polymarket_outcome_up !== null && o.outcome_up !== null &&
-        o.polymarket_outcome_up !== o.outcome_up) {
-      disagreements++;
-    }
+    const upWon = o.polymarket_outcome_up === 1;
+    resolvedFromPolymarket++;
 
     const win = (tr.side === "UP" && upWon) || (tr.side === "DOWN" && !upWon);
-    const shares = tr.riskUsd / tr.takerPrice;
     const fees = tr.riskUsd * STRATEGY.takerFee;
-    const pnl = (win ? 1 : 0) * shares - shares * tr.takerPrice - fees;
+    // P&L on the ACTUAL filled shares: win pays $1/share, loss is the whole stake.
+    const pnl = (win ? 1 : 0) * tr.shares - tr.shares * tr.takerPrice - fees;
     if (win) wins++;
     totalPnl += pnl;
     totalRisk += tr.riskUsd;
   }
-  const resolved = trades.length - skippedNoOutcome.length;
+  const resolved = resolvedFromPolymarket;
   const winRate = resolved > 0 ? wins / resolved : 0;
   const roi = totalRisk > 0 ? totalPnl / totalRisk : 0;
 
-  logger.info("Backtest result", {
+  logger.info("Backtest result (Polymarket-settled, live-sized)", {
     trades: trades.length,
     resolved,
-    resolvedFromPolymarket,
-    resolvedFromBinance,
-    skippedNoOutcome: skippedNoOutcome.length,
-    binanceVsPolymarketDisagreements: disagreements,
+    skippedNoPolymarketOutcome: skippedNoOutcome.length,
     wins,
     winRate: (winRate * 100).toFixed(1) + "%",
     totalRiskUsd: totalRisk.toFixed(2),
