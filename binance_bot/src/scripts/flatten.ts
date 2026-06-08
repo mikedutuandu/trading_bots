@@ -1,7 +1,7 @@
 import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { getDb, closeDb } from "../storage/db.js";
-import { binance } from "../exchange/binance.js";
+import { binance, briefError } from "../exchange/binance.js";
 import { useVenue } from "../exchange/venue.js";
 import { getExchangeInfo } from "../exchange/marketData.js";
 import { getOpenPositions } from "../exchange/account.js";
@@ -35,25 +35,44 @@ async function main(): Promise<void> {
   }
 
   logger.warn(`flattening ${positions.length} position(s) on ${live ? "MAINNET" : "testnet"} …`);
+  const attempted: string[] = [];
   for (const p of positions) {
     const filter = filters.get(p.symbol);
     if (!filter || p.side === null) {
       logger.warn(`  skip ${p.symbol} (no filter / flat)`);
       continue;
     }
+    attempted.push(p.symbol);
     try {
       await cancelAllOrders(p.symbol); // drop resting basic orders
       await placeMarketOrder(p.symbol, p.side, Math.abs(p.qty), filter, { reduceOnly: true, tag: "flatten" });
-      deletePosition(p.symbol);
-      logger.info(`  closed ${p.symbol} ${p.side} ${Math.abs(p.qty)}`);
+      logger.info(`  sent close ${p.symbol} ${p.side} ${Math.abs(p.qty)}`);
     } catch (err) {
-      logger.error(`  failed to close ${p.symbol}:`, err);
+      // The demo venue often fills the reduceOnly order yet returns no fill price, so
+      // placeMarketOrder throws ("no usable fill price") even though the position closed.
+      // Don't trust the throw — verify against exchange truth below before reporting.
+      logger.warn(`  close ${p.symbol} reported an error (${briefError(err)}); will verify against exchange`);
     }
   }
   // Cancel ALL conditional (algo) stops in one sweep — covers both the just-closed
   // positions and any orphaned stops not tied to a position.
   for (const a of await getOpenAlgoOrders()) await cancelAlgoOrder(a.symbol, a.algoId);
-  logger.info("flatten done");
+
+  // Verify against exchange truth: a thrown close may still have filled. Give the venue
+  // a moment to settle, then re-read positions and report what actually happened. Only
+  // clear a tracked row once the exchange confirms that symbol is flat.
+  await new Promise((r) => setTimeout(r, 1500));
+  const stillOpen = new Set((await getOpenPositions()).map((p) => p.symbol));
+  for (const sym of attempted) {
+    if (stillOpen.has(sym)) {
+      logger.error(`  STILL OPEN: ${sym} — close did not go through; re-run flatten or close it manually`);
+    } else {
+      deletePosition(sym);
+      logger.info(`  confirmed flat: ${sym}`);
+    }
+  }
+  const failed = attempted.filter((sym) => stillOpen.has(sym)).length;
+  logger.info(`flatten done — ${attempted.length - failed}/${attempted.length} confirmed flat${failed ? `, ${failed} STILL OPEN` : ""}`);
   closeDb();
 }
 

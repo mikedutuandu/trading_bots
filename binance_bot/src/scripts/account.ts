@@ -1,7 +1,7 @@
 import { logger } from "../logger.js";
 import { binance } from "../exchange/binance.js";
 import { useVenue } from "../exchange/venue.js";
-import { getAccountEquity, getOpenPositions } from "../exchange/account.js";
+import { getAccountEquity, getOpenPositions, formatPosition } from "../exchange/account.js";
 import { loadPositions } from "../storage/positions.js";
 import { getDb, closeDb } from "../storage/db.js";
 
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
     logger.info("no open positions on the exchange");
   } else {
     for (const p of positions) {
-      logger.info(`  ${p.symbol}  ${p.side}  qty=${p.qty}  entry=${p.entry}  uPnL=${p.unrealized.toFixed(2)}`);
+      logger.info(`  ${formatPosition(p)}`);
     }
   }
 

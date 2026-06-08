@@ -2,6 +2,7 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { getExchangeInfo, getUniverse } from "../exchange/marketData.js";
 import { lastFill } from "../exchange/orders.js";
+import { formatPosition, getOpenPositions } from "../exchange/account.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
 import { paramsFromEnv } from "../playbooks/paramsFromEnv.js";
 import { saveTrade } from "../storage/trades.js";
@@ -52,7 +53,7 @@ export async function buildEngineDeps(opts: { modelFunding: boolean }): Promise<
  * Live startup reconcile: align the DB's open positions with the exchange truth.
  * - DB position the exchange no longer holds → it closed while we were down;
  *   finalize the journal at the last fill price and drop the runtime row.
- * - Exchange position we didn't open (no DB row) → warn; we don't manage it.
+ * - Exchange position we didn't open (no DB row) → warn loudly; we don't manage it.
  */
 export async function reconcileLive(broker: Broker, deps: EngineDeps): Promise<void> {
   const tracked = loadPositions();
@@ -81,5 +82,27 @@ export async function reconcileLive(broker: Broker, deps: EngineDeps): Promise<v
         }
       }
     }
+  }
+
+  // Orphan guard: positions LIVE on the exchange that the bot is NOT tracking — e.g.
+  // opened by a previous run/config or left behind after the DB was reset. The engine
+  // only ever iterates tracked positions, so these get no stop, no TP ladder, and no
+  // guardian: they bleed silently and never show on the dashboard. Surface them loudly.
+  // We warn (not auto-close) because flattening is destructive and is the operator's
+  // call; `npm run flatten` cleans them up.
+  const trackedSymbols = new Set(tracked.map((ep) => ep.symbol));
+  const onExchange = await getOpenPositions().catch((err) => {
+    logger.warn("reconcile: could not list exchange positions for orphan check:", err);
+    return [];
+  });
+  const orphans = onExchange.filter((xp) => !trackedSymbols.has(xp.symbol));
+  for (const xp of orphans) {
+    logger.warn(
+      `reconcile: UNTRACKED ${formatPosition(xp)} is open on the exchange but NOT managed ` +
+        `by the bot (no stop / TP / guardian). Run \`npm run flatten\` to close it.`,
+    );
+  }
+  if (orphans.length > 0) {
+    logger.warn(`reconcile: ${orphans.length} UNTRACKED exchange position(s) — bot will not manage them.`);
   }
 }

@@ -60,6 +60,11 @@ function toPosition(r: RawPositionRisk): ExchangePosition {
   };
 }
 
+/** One-line description of an exchange position for logs. */
+export function formatPosition(p: ExchangePosition): string {
+  return `${p.symbol} ${p.side} qty=${p.qty} entry=${p.entry} uPnL=${p.unrealized.toFixed(2)}`;
+}
+
 /** Net position for one symbol (source of truth for reconciliation). */
 export async function getPosition(symbol: string): Promise<ExchangePosition> {
   const rows = await binance.signedGet<RawPositionRisk[]>("/fapi/v2/positionRisk", {
