@@ -111,6 +111,7 @@ export const config = {
     intervalMin: num("MONITOR_INTERVAL_MIN", 1), // how often to check open positions (minutes)
     reversalMode: monitorMode(), // off | warn | exit — what to do on a faster-TF trend flip
     reversalTf: env("MONITOR_REVERSAL_TF", "15m"), // timeframe for the EMA50/EMA200 reversal check
+    summaryMin: num("MONITOR_SUMMARY_MIN", 15), // periodic Telegram open-positions summary; 0 = off
   },
 
   ops: {

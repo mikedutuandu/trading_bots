@@ -111,6 +111,15 @@ export function getClosedTrades(): Trade[] {
   return rows.map(rowToTrade);
 }
 
+/** CLOSED trades that closed at/after `sinceMs` — avoids loading the full (unbounded)
+ *  history just to compute a recent slice (e.g. today's). */
+export function getClosedSince(sinceMs: number): Trade[] {
+  const rows = getDb()
+    .prepare(`SELECT * FROM trades WHERE status = 'CLOSED' AND closed_at >= ? ORDER BY closed_at ASC`)
+    .all(sinceMs) as TradeRow[];
+  return rows.map(rowToTrade);
+}
+
 /** Most recent close time for a symbol (drives the per-symbol entry cooldown). */
 export function lastCloseTime(symbol: string): number | null {
   const row = getDb()

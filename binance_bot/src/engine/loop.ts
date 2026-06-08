@@ -1,14 +1,14 @@
 import { config } from "../config.js";
 import { logger } from "../logger.js";
-import { dayKey, sleep } from "../util.js";
+import { dayKey, dayStartMs, sleep } from "../util.js";
 import type { Candle, Side, SymbolFilter, Trade } from "../types.js";
 import { binance, briefError } from "../exchange/binance.js";
-import { getKlines, getMarkPrice } from "../exchange/marketData.js";
+import { getKlines, getMarkPrice, getMarkPrices } from "../exchange/marketData.js";
 import { computeIndicators } from "../playbooks/index.js";
 import type { IndicatorCtx, Playbook, StrategyParams } from "../playbooks/types.js";
 import { sizePosition, splitTranches, type SizingOpts } from "../risk/sizing.js";
 import { closeReasonOf, manageOnCandle, type RuntimePosition } from "../risk/manage.js";
-import { saveTrade, lastCloseTime } from "../storage/trades.js";
+import { saveTrade, lastCloseTime, getClosedSince } from "../storage/trades.js";
 import { getDb } from "../storage/db.js";
 import {
   deletePosition,
@@ -24,7 +24,7 @@ import {
   saveEquitySnapshot,
   setMeta,
 } from "../storage/engineState.js";
-import { notifyEvent } from "../notifications/telegram.js";
+import { notify, notifyEvent, telegramEnabled } from "../notifications/telegram.js";
 import { maybeBackup } from "./backup.js";
 import type { Broker, BrokerPosition } from "./broker.js";
 
@@ -660,6 +660,57 @@ export async function monitorOpenPositions(broker: Broker, deps: EngineDeps): Pr
   setMeta(MONITOR_STATUS_KEY, JSON.stringify(status));
 }
 
+// Periodic Telegram open-positions summary so the book can be watched without the dashboard.
+// Gated to one send per MONITOR_SUMMARY_MIN boundary; the loop calls it on every wake.
+let lastSummaryBoundary = 0;
+
+async function maybeSendPositionSummary(broker: Broker): Promise<void> {
+  const summaryMs = Math.round(config.monitor.summaryMin) * 60_000;
+  if (summaryMs <= 0 || !telegramEnabled) return;
+  const boundary = Math.floor(Date.now() / summaryMs) * summaryMs;
+  if (boundary === lastSummaryBoundary) return;
+  lastSummaryBoundary = boundary; // claim this period up-front so a slow send can't double-fire
+
+  const open = loadPositions();
+  if (open.length === 0) return; // nothing to report; entry/exit alerts cover trade transitions
+  const status = parseMonitorStatus(getMeta(MONITOR_STATUS_KEY));
+  const venue = getMeta("engine:label") ?? "engine";
+  const signed = (n: number) => (n >= 0 ? "+" : "") + n.toFixed(2);
+  const money = (n: number | null) => (n === null ? "—" : "$" + signed(n)); // signed $ or dash
+  const rval = (n: number | null) => (n === null ? "—" : signed(n)); // signed R or dash
+
+  // One batched mark fetch for the whole book (same call the dashboard uses), not N.
+  const marks = await getMarkPrices().catch(() => new Map<string, number>());
+  let totalUpnl = 0;
+  const lines: string[] = [];
+  for (const ep of open) {
+    const mark = marks.get(ep.symbol) ?? null;
+    const dir = ep.pos.side === "long" ? 1 : -1;
+    const upnl = mark === null ? null : dir * (mark - ep.pos.entry) * ep.pos.qtyRemaining;
+    if (upnl !== null) totalUpnl += upnl;
+    const r = upnl !== null && ep.riskUsdt > 0 ? upnl / ep.riskUsdt : null;
+    const st = status[ep.symbol];
+    let trend = "—";
+    if (ep.pos.tp2Hit) trend = "trail";
+    else if (st && st.up !== null) trend = (st.against ? "⚠" : "✓") + (st.up ? "↑" : "↓");
+    lines.push(
+      `<b>${ep.symbol}</b> ${ep.pos.side}  R ${rval(r)}  uPnL ${money(upnl)}\n` +
+        `entry <code>${ep.pos.entry}</code> · mark <code>${mark ?? "—"}</code> · stop <code>${ep.pos.stop}</code> · ${config.monitor.reversalTf} ${trend}`,
+    );
+  }
+
+  // Account context: LIVE equity (includes unrealized) — note this can differ from the
+  // dashboard, which shows the last per-tick equity snapshot. Today = realized P&L (UTC).
+  let equity: number | null = null;
+  try { equity = await broker.getEquity(); } catch { /* show — if the account call blips */ }
+  const closedToday = getClosedSince(dayStartMs(Date.now()));
+  const todayPnl = closedToday.reduce((s, t) => s + (t.netPnl ?? 0), 0);
+
+  const acct = `📊 <b>${venue}</b>${equity === null ? "" : ` · Equity <b>$${equity.toFixed(2)}</b>`} · Today $${signed(todayPnl)} (${closedToday.length} closed)`;
+  const posHdr = `Open ${open.length}/${config.risk.maxOpenPositions} · Σ uPnL $${signed(totalUpnl)}`;
+  await notify([acct, posHdr, "", ...lines].join("\n"));
+}
+
 /**
  * Run the engine on a DUAL cadence:
  *   - a FULL tick (manage ladder + scan entries) a short buffer after each timeframe
@@ -715,6 +766,9 @@ export async function runScheduled(
       await safeTick(broker, deps);
     } else if (monitorOn) {
       await safeGuardian(broker, deps);
+    }
+    if (monitorOn) {
+      await maybeSendPositionSummary(broker).catch((err) => logger.warn(`position summary failed: ${briefError(err)}`));
     }
   }
   logger.info("engine loop stopped");
