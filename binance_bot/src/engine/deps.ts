@@ -3,6 +3,7 @@ import { logger } from "../logger.js";
 import { getExchangeInfo, getUniverse } from "../exchange/marketData.js";
 import { lastFill } from "../exchange/orders.js";
 import { formatPosition, getOpenPositions } from "../exchange/account.js";
+import { notifyEvent } from "../notifications/telegram.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
 import { paramsFromEnv } from "../playbooks/paramsFromEnv.js";
 import { saveTrade } from "../storage/trades.js";
@@ -103,6 +104,9 @@ export async function reconcileLive(broker: Broker, deps: EngineDeps): Promise<v
     );
   }
   if (orphans.length > 0) {
-    logger.warn(`reconcile: ${orphans.length} UNTRACKED exchange position(s) — bot will not manage them.`);
+    const summary = `${orphans.length} UNTRACKED exchange position(s) — bot will NOT manage them (no stop/TP/guardian). Run \`npm run flatten\`.`;
+    logger.warn(`reconcile: ${summary}`);
+    // Unmanaged leverage is a silent risk — alert the operator's channel, not just the logs.
+    void notifyEvent("error", `reconcile: ${summary}\n${orphans.map(formatPosition).join("\n")}`);
   }
 }
