@@ -45,7 +45,8 @@ function db(): Database.Database {
   const d = new Database(DB_PATH);
   d.pragma("journal_mode = WAL");
   d.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-          CREATE TABLE IF NOT EXISTS rebalances (ts INTEGER PRIMARY KEY, longs TEXT, shorts TEXT, equity REAL);`);
+          CREATE TABLE IF NOT EXISTS rebalances (ts INTEGER PRIMARY KEY, longs TEXT, shorts TEXT, equity REAL);
+          CREATE TABLE IF NOT EXISTS book_legs (symbol TEXT PRIMARY KEY, side TEXT NOT NULL, qty REAL NOT NULL, notional REAL NOT NULL);`);
   return d;
 }
 const getMeta = (d: Database.Database, k: string): string | null =>
@@ -102,7 +103,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const universe = (process.env.XSMOM_SYMBOLS ? process.env.XSMOM_SYMBOLS.split(",").map((s) => s.trim()) : config.universe.symbols).filter(Boolean);
+  // XSMOM_EXCLUDE drops symbols that can't size near the per-leg notional (e.g. BTC, whose
+  // coarse step forces a much larger position) so the book stays dollar-balanced at small size.
+  const exclude = new Set((process.env.XSMOM_EXCLUDE ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+  const universe = (process.env.XSMOM_SYMBOLS ? process.env.XSMOM_SYMBOLS.split(",").map((s) => s.trim()) : config.universe.symbols)
+    .filter(Boolean)
+    .filter((s) => !exclude.has(s));
   const universeSet = new Set(universe);
 
   // 1) SIGNAL from MAINNET funding (real edge), via the shared cross-sectional logic.
@@ -178,6 +184,17 @@ async function main(): Promise<void> {
     store.close();
     return;
   }
+  // Dollar-balance check (warn, don't block): high-priced coins (BTC) that can't size at the
+  // target notional skew the book net-directional. Surface it; the fix is XSMOM_EXCLUDE or a bigger notional.
+  const legNotional = (side: Side) => [...target.entries()].filter(([, t]) => t.side === side).reduce((a, [sym, t]) => a + t.qty * (prices.get(sym) ?? 0), 0);
+  const longNot = legNotional("long");
+  const shortNot = legNotional("short");
+  const imbalance = Math.abs(longNot - shortNot) / Math.max(longNot, shortNot, 1);
+  if (imbalance > 0.2) {
+    const msg = `book ${(imbalance * 100).toFixed(0)}% net-${longNot > shortNot ? "long" : "short"} ($${longNot.toFixed(0)}L / $${shortNot.toFixed(0)}S) — not dollar-neutral at ${NOTIONAL}/leg. Use XSMOM_EXCLUDE=BTCUSDT,BNBUSDT or a bigger XSMOM_NOTIONAL.`;
+    logger.warn(`xsmom-exec: ${msg}`);
+    void notifyEvent("error", `XSMOM ${VENUE}: ${msg}`);
+  }
 
   // 5) Reconcile: keep same-side legs, close what flipped/exited, open what's new.
   const cur = new Map<string, ExchangePosition>();
@@ -236,6 +253,12 @@ async function main(): Promise<void> {
   const shorts = after.filter((p) => p.side === "short" && universeSet.has(p.symbol)).map((p) => p.symbol);
   setMeta(store, "last_rebalance_ts", String(Date.now()));
   store.prepare(`INSERT OR REPLACE INTO rebalances (ts, longs, shorts, equity) VALUES (?, ?, ?, ?)`).run(Date.now(), longs.join(","), shorts.join(","), eq.equity);
+  // Per-leg sizes for the dashboard's current-book view (notional = |qty| × mark price).
+  store.prepare(`DELETE FROM book_legs`).run();
+  const insLeg = store.prepare(`INSERT INTO book_legs (symbol, side, qty, notional) VALUES (?, ?, ?, ?)`);
+  for (const p of after) {
+    if (p.side && universeSet.has(p.symbol)) insLeg.run(p.symbol, p.side, p.qty, Math.abs(p.qty) * (prices.get(p.symbol) ?? p.entry));
+  }
   store.close();
 
   const summary =

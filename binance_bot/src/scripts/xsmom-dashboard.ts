@@ -44,6 +44,7 @@ function buildState(): object {
     let fundingTracked = true;
     let unit: "x" | "USDT" = "x";
     let count = 0; // number of rebalance/period records (for the header + KPI)
+    let legs: Record<string, { qty: number; notional: number }> = {}; // per-leg sizes (executor only)
 
     if (tables.has("periods")) {
       const periods = db.prepare(`SELECT ts, ret, fund, equity, longs, shorts FROM periods ORDER BY ts ASC`).all() as Period[];
@@ -59,6 +60,11 @@ function buildState(): object {
       unit = "USDT";
       fundingTracked = false;
       count = rebs.length;
+      if (tables.has("book_legs")) {
+        for (const l of db.prepare(`SELECT symbol, qty, notional FROM book_legs`).all() as Array<{ symbol: string; qty: number; notional: number }>) {
+          legs[l.symbol] = { qty: l.qty, notional: l.notional };
+        }
+      }
       curve = rebs.map((r) => ({ ts: r.ts, equity: r.equity }));
       const latest = rebs[rebs.length - 1];
       longs = latest ? latest.longs.split(",").filter(Boolean) : [];
@@ -102,6 +108,7 @@ function buildState(): object {
       curve,
       longs,
       shorts,
+      legs,
       periods: periodsOut,
     };
   } finally {
@@ -162,6 +169,7 @@ const PAGE = `<!doctype html>
   .leg { background: #11161f; border: 1px solid #1c2230; border-radius: 10px; padding: 12px 14px; }
   .leg .ttl { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
   .tag { display: inline-block; background: #1c2230; border-radius: 6px; padding: 2px 7px; margin: 2px 4px 2px 0; font-size: 12px; }
+  .tag b { color: #58a6ff; font-weight: 600; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid #1c2230; }
   th:first-child, td:first-child { text-align: left; }
@@ -208,8 +216,9 @@ async function tick(){
       kpi('Max drawdown', s.maxDDPct.toFixed(1)+'%', 'neg') +
       kpi('Rebalances', String(s.count));
     chart(s.curve);
-    document.getElementById('longs').innerHTML = (s.longs||[]).map(x=>'<span class="tag">'+x+'</span>').join('') || '<span class="muted">none</span>';
-    document.getElementById('shorts').innerHTML = (s.shorts||[]).map(x=>'<span class="tag">'+x+'</span>').join('') || '<span class="muted">none</span>';
+    const tag = (x)=>'<span class="tag">'+x+(s.legs&&s.legs[x]?' <b>$'+Math.round(s.legs[x].notional)+'</b>':'')+'</span>';
+    document.getElementById('longs').innerHTML = (s.longs||[]).map(tag).join('') || '<span class="muted">none</span>';
+    document.getElementById('shorts').innerHTML = (s.shorts||[]).map(tag).join('') || '<span class="muted">none</span>';
     document.getElementById('rows').innerHTML = (s.periods||[]).map(r=>
       '<tr><td>'+fmtTs(r.ts)+'</td><td class="'+cls(r.ret)+'">'+pct(r.ret*100)+'</td>'+(s.fundingTracked?'<td class="'+cls(r.fund)+'">'+pct(r.fund*100)+'</td>':'<td class="muted">—</td>')+'<td>'+(s.unit==='USDT'?r.equity.toFixed(2):r.equity.toFixed(4))+'</td>'+
       '<td class="muted">'+(r.longs||'').replaceAll(',',' ')+'</td><td class="muted">'+(r.shorts||'').replaceAll(',',' ')+'</td></tr>').join('') ||
