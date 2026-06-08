@@ -1,4 +1,5 @@
 import type { Side, SymbolFilter } from "../types.js";
+import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { roundToStep, roundToTick } from "../risk/sizing.js";
 import { binance, briefError, isBinanceCode } from "./binance.js";
@@ -97,17 +98,35 @@ export async function placeMarketOrder(
   // Prefer precise fills from userTrades; fall back to the order response.
   let price = Number(order.avgPrice);
   let filled = Number(order.executedQty);
+  // A RESULT response can omit/blank avgPrice → NaN. Recover the VWAP from cumQuote/qty
+  // so a junk price never propagates into settleFill → grossPnl (which corrupts a closed
+  // trade's PnL to NaN/NULL). Seen on the demo venue's reduceOnly market exits.
+  if (!Number.isFinite(price) || price <= 0) {
+    const cq = Number(order.cumQuote);
+    if (Number.isFinite(cq) && Number.isFinite(filled) && filled > 0) price = cq / filled;
+  }
   let commission = 0;
+  let feeFromTrades = false;
   try {
     const f = await fillsForOrder(symbol, order.orderId);
     if (f.qty > 0) {
       price = f.price;
       filled = f.qty;
+      commission = f.commission;
+      feeFromTrades = true;
     }
-    commission = f.commission;
   } catch (err) {
     logger.warn(`${symbol} could not read userTrades for order ${order.orderId}:`, err);
   }
+  // Last resort: never return a non-finite fill price. Throwing here is safe — the caller's
+  // per-symbol try/catch keeps the position tracked and the next tick's reconcile journals
+  // it from exchange truth (lastFill / stop), rather than recording a NaN close.
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error(`${symbol} order ${order.orderId}: no usable fill price (avgPrice='${order.avgPrice}', cumQuote='${order.cumQuote}')`);
+  }
+  // If userTrades was unreadable, estimate the taker fee instead of journalling 0
+  // (mirrors the reconcileFlat fee-estimate convention).
+  if (!feeFromTrades) commission = config.risk.takerFee * price * filled;
   logger.info(
     `${opts.reduceOnly ? "REDUCE" : "OPEN"} ${symbol} ${tradeSide} qty=${filled} @ ${price} fee=${commission.toFixed(4)}`,
   );

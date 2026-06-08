@@ -130,16 +130,26 @@ export function buildClosedTrade(
   leverage: number,
   timeframe: string,
 ): Trade {
-  const netPnl = ep.grossPnl - ep.commission + ep.funding;
+  // Defensive: if a non-finite fill ever poisoned the accumulator, recompute gross
+  // deterministically from entry/exit/qty (correct for a single-exit close; multi-tranche
+  // trades keep a finite accumulator, so this only fires in the pathological NaN case).
+  // Guarantees a finite, correct-signed PnL is journaled and notified — never NaN/NULL.
+  const long = ep.pos.side === "long";
+  const grossPnl = Number.isFinite(ep.grossPnl)
+    ? ep.grossPnl
+    : (long ? exitPrice - ep.pos.entry : ep.pos.entry - exitPrice) * ep.pos.qtyTotal;
+  const commission = Number.isFinite(ep.commission) ? ep.commission : 0;
+  const funding = Number.isFinite(ep.funding) ? ep.funding : 0;
+  const netPnl = grossPnl - commission + funding;
   return {
     ...toTrade(ep, leverage, timeframe),
     status: "CLOSED",
     exitPrice,
     closeReason: reason,
     rRealized: ep.riskUsdt > 0 ? netPnl / ep.riskUsdt : 0,
-    grossPnl: ep.grossPnl,
-    commission: ep.commission,
-    funding: ep.funding,
+    grossPnl,
+    commission,
+    funding,
     netPnl,
     closedAt,
   };
@@ -162,14 +172,15 @@ function finalizeClose(
     deletePosition(ep.symbol);
   })();
   const netPnl = trade.netPnl!;
+  const rStr = ep.riskUsdt > 0 ? (netPnl / ep.riskUsdt).toFixed(2) : "0";
   logger.info(
     `CLOSE ${ep.symbol} ${ep.pos.side} ${reason} net=${netPnl.toFixed(2)} ` +
-      `(gross ${ep.grossPnl.toFixed(2)} fee ${ep.commission.toFixed(2)} fund ${ep.funding.toFixed(2)})`,
+      `(gross ${(trade.grossPnl ?? 0).toFixed(2)} fee ${(trade.commission ?? 0).toFixed(2)} fund ${(trade.funding ?? 0).toFixed(2)})`,
   );
   void notifyEvent(
     netPnl >= 0 ? "exit" : "error",
     `<b>CLOSE ${ep.symbol} ${ep.pos.side}</b> ${reason} @ ${exitPrice}\n` +
-      `net <b>${netPnl >= 0 ? "+" : ""}${netPnl.toFixed(2)} USDT</b> (${ep.riskUsdt > 0 ? (netPnl / ep.riskUsdt).toFixed(2) : "0"}R)`,
+      `net <b>${netPnl >= 0 ? "+" : ""}${netPnl.toFixed(2)} USDT</b> (${rStr}R)`,
   );
 }
 
@@ -402,8 +413,12 @@ export function settleFill(
 ): void {
   const long = side === "long";
   const gross = long ? (price - ep.pos.entry) * qty : (ep.pos.entry - price) * qty;
-  ep.grossPnl += gross;
-  ep.commission += commission;
+  // Never poison the running PnL with a non-finite fill (a flaky venue can hand back a
+  // NaN price/qty). buildClosedTrade recomputes a finite gross from entry/exit/qty if this
+  // ever leaves grossPnl non-finite, so a skipped fold can't lose money silently.
+  if (Number.isFinite(gross)) ep.grossPnl += gross;
+  else logger.warn(`settleFill ${ep.symbol}: skipped non-finite fill (price=${price} qty=${qty})`);
+  if (Number.isFinite(commission)) ep.commission += commission;
 }
 
 /** Detect, size, open, and protect a new position for one symbol. */
