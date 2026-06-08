@@ -27,6 +27,8 @@ import { getHistoryDb } from "../storage/history-db.js";
 const MODEL_HALF_SPREAD = Number(process.env.HIST_MODEL_HALF_SPREAD ?? 0.005);
 // Ranking ignores configs with fewer than this many train trades (small samples are noise).
 const MIN_TRADES_FOR_RANK = Number(process.env.HIST_MIN_TRADES ?? 80);
+// Contrarian mode: when the signal says UP, bet DOWN (and vice-versa). For testing "do the opposite".
+const INVERT = process.env.INVERT === "1" || process.env.INVERT === "true";
 
 interface Win {
   startTs: number;
@@ -172,24 +174,39 @@ function runConfig(cfg: Cfg, subset: Win[], sink?: TradeRec[]): Result {
         requireTrendAgreement: cfg.requireTrendAgreement,
       });
       if (!decision.side || decision.takerPrice === null) continue;
-      const riskUsd = kellyRiskUsd({
-        bankrollUsd: config.strategy.bankrollUsd, edge: decision.edge,
-        takerPrice: decision.takerPrice, maxRiskFraction, kellyFraction: config.strategy.kellyFraction,
-      });
+      // Contrarian mode: bet the OPPOSITE side, at THAT side's ask. The model edge on the flipped
+      // side is (usually) negative, so Kelly would zero it out — size it flat instead, comparable
+      // to a deliberate "always fade the signal" bettor.
+      let side = decision.side;
+      let takerPrice = decision.takerPrice;
+      let sizingEdge = decision.edge;
+      if (INVERT) {
+        side = side === "UP" ? "DOWN" : "UP";
+        const oppAsk = side === "UP" ? upQuotes.bestAsk : downQuotes.bestAsk;
+        if (oppAsk === null) continue;
+        takerPrice = oppAsk;
+        sizingEdge = (side === "UP" ? fv.pUp : fv.pDown) - oppAsk;
+      }
+      const riskUsd = INVERT
+        ? config.live.maxTradeUsd
+        : kellyRiskUsd({
+            bankrollUsd: config.strategy.bankrollUsd, edge: sizingEdge,
+            takerPrice, maxRiskFraction, kellyFraction: config.strategy.kellyFraction,
+          });
       if (riskUsd <= 1) continue;
       // SAME live sizing the real-money path uses: cap, 5-share minimum, reject overshoot.
       const cappedRiskUsd = Math.min(riskUsd, config.live.maxTradeUsd);
-      const rawShares = cappedRiskUsd / decision.takerPrice;
+      const rawShares = cappedRiskUsd / takerPrice;
       const shares = Math.max(config.collector.polymarketMinShares, Math.ceil(rawShares * 100) / 100);
-      const actualRiskUsd = shares * decision.takerPrice;
+      const actualRiskUsd = shares * takerPrice;
       if (actualRiskUsd > config.live.maxTradeUsd * config.collector.liveSizeCapTolerance) continue;
-      const won = (decision.side === "UP" && w.outcomeUp === 1) || (decision.side === "DOWN" && w.outcomeUp === 0);
-      pnl += (won ? 1 : 0) * shares - shares * decision.takerPrice; // fees = 0 (Polymarket charges no taker fee)
+      const won = (side === "UP" && w.outcomeUp === 1) || (side === "DOWN" && w.outcomeUp === 0);
+      pnl += (won ? 1 : 0) * shares - shares * takerPrice; // fees = 0 (Polymarket charges no taker fee)
       risk += actualRiskUsd;
-      edgeSum += decision.edge;
+      edgeSum += sizingEdge;
       trades++;
       if (won) wins_++;
-      sink?.push({ endTs: w.endTs, price: decision.takerPrice, won });
+      sink?.push({ endTs: w.endTs, price: takerPrice, won });
       break; // one trade per window (first qualifying point), matching live
     }
   }

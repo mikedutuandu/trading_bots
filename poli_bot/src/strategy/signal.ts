@@ -24,6 +24,10 @@ export interface SignalInputs {
   blockAgainstTrend?: boolean;
   // Path A — UP-only mode with model-confidence threshold.
   upOnly?: boolean;
+  // Contrarian mode: after the signal picks a side, bet the OPPOSITE side instead (UP<->DOWN).
+  // Backtest verdict: this drops win rate ~66%->~34% and is net-negative OOS — enabled by explicit
+  // STRATEGY_INVERT_SIGNAL only, as a deliberate experiment.
+  invertSignal?: boolean;
   minFvUp?: number;
   // Path A refinements — only trade when bot mildly disagrees with market.
   maxEdge?: number;        // skip when bot disagrees with market too strongly
@@ -132,6 +136,25 @@ export function decide(s: SignalInputs): SignalDecision {
     if (best.side === "DOWN" && s.annualizedDrift > 0) {
       return reject(`DOWN but recent BTC trend is up (drift +${s.annualizedDrift.toFixed(0)})`, s.fair.pUp, marketUpMid, best.edge, best.price, best.spread);
     }
+  }
+
+  if (s.invertSignal) {
+    // Take the OPPOSITE side at its ask, keeping the original edge magnitude so position SIZE is
+    // unchanged — only the side flips. The opposite ask must exist to enter.
+    const flipped: Side = best.side === "UP" ? "DOWN" : "UP";
+    const flippedAsk = flipped === "UP" ? s.upQuotes.bestAsk : s.downQuotes.bestAsk;
+    if (flippedAsk === null) {
+      return reject("invert: no opposite-side ask", s.fair.pUp, marketUpMid, best.edge, best.price, best.spread);
+    }
+    return {
+      side: flipped,
+      reason: "inverted",
+      edge: best.edge,
+      takerPrice: flippedAsk,
+      bookSpread: flipped === "UP" ? s.upQuotes.spread : s.downQuotes.spread,
+      fairUp: s.fair.pUp,
+      marketUp: marketUpMid,
+    };
   }
 
   return {

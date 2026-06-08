@@ -70,6 +70,7 @@ export const config = {
     maxRemainingSec: int("STRATEGY_MAX_REMAINING_SEC", 200),
     maxVol: num("STRATEGY_MAX_VOL", 0.20),
     upOnly: bool("STRATEGY_UP_ONLY", false),
+    invertSignal: bool("STRATEGY_INVERT_SIGNAL", false),
     minFvUp: num("STRATEGY_MIN_FV_UP", 0),
     maxEdge: num("STRATEGY_MAX_EDGE", 1),
     minEntryPrice: num("STRATEGY_MIN_ENTRY_PRICE", 0),

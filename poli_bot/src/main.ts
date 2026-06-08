@@ -453,7 +453,7 @@ async function main(): Promise<void> {
       minRemainingSec: STRATEGY.minRemainingSec, maxRemainingSec: STRATEGY.maxRemainingSec,
       remainingSec, spot: btc.price, strike: state.windowOpenBtcPrice, annualizedDrift: drift,
       maxVol: STRATEGY.maxVol, annualizedVol: annualVol,
-      upOnly: STRATEGY.upOnly, minFvUp: STRATEGY.minFvUp,
+      upOnly: STRATEGY.upOnly, invertSignal: STRATEGY.invertSignal, minFvUp: STRATEGY.minFvUp,
       maxEdge: STRATEGY.maxEdge, minEntryPrice: STRATEGY.minEntryPrice, maxEntryPrice: STRATEGY.maxEntryPrice,
       maxBtcMovedPct: STRATEGY.maxBtcMovedPct, minBtcMovedPct: STRATEGY.minBtcMovedPct,
       requireTrendAgreement: STRATEGY.requireTrendAgreement,
