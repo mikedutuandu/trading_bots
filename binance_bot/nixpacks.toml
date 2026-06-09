@@ -1,0 +1,21 @@
+# Railway / Nixpacks build config for the Binance bot.
+#
+# REQUIRED in the Railway service settings: set Root Directory = binance_bot
+# (so this file + package.json are found, and Node 20 gets provisioned).
+#
+# The app runs the TypeScript sources DIRECTLY via tsx — there is NO compile step,
+# so the default `npm run build` (tsc) is replaced with a no-op here.
+#
+# Set the actual process in Railway → Settings → Deploy → Custom Start Command, e.g.:
+#   npm run xsmom-live:loop     # funding-carry executor (in-code 24/7 loop)
+#   npm run live                # trend-pullback engine
+# (the line below is just the default if no custom start command is set.)
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["true"] # no build — tsx runs the .ts sources directly
+
+[start]
+cmd = "npm run xsmom-live:loop"
