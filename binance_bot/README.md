@@ -4,8 +4,9 @@ A systematic **Binance USDT-M perpetual futures** bot (long/short, 1h timeframe)
 from a friend's profitable bot. R-based risk, scaled take-profits + a trailing runner, and an
 intra-minute safety guardian.
 
-> **Status (2026-06):** feature-complete, in **testnet forward-test**. The edge is **marginal and
-> regime-dependent — not yet proven**. Keep live size tiny. See [§7 The honest risk picture](#7-the-honest-risk-picture--read-before-going-live).
+> **Status (2026-06-10):** **LIVE on mainnet at tiny size** (~$1k, 1% risk, $500/leg notional cap),
+> forward-testing the §2 sweep-winner config. The edge is **thin (walk-forward PF 1.02–1.13) and
+> only replay-validated — not yet proven live**. See [§7 The honest risk picture](#7-the-honest-risk-picture--read-before-going-live).
 
 This is the single design/status doc. For the day-to-day code map and non-obvious invariants, see
 [CLAUDE.md](CLAUDE.md).
@@ -171,20 +172,22 @@ research, `testnet`, `live`). Config flows `env → config.ts → typed config`.
 
 ## 7. The honest risk picture — read before going live
 
-**This is the most important section.** A 2026-06 walk-forward grid (train Dec'24–Dec'25, OOS Jan–Jun'26)
-found:
+**This is the most important section.** Updated 2026-06-10 after the LIVE_SIM parity work — earlier
+headline numbers (run on the ~69-symbol research DB with no guardian) flattered the picture:
 
-- **Every TP config loses ~90% IN-SAMPLE** (PF ~0.81). The positive returns exist *only* in the recent
-  out-of-sample window. **The edge is regime-dependent, not validated** — the backtest is a "don't be
-  reckless" light, not a green light.
-- **`MAX_OPEN_POSITIONS` was the biggest lever** — the −90% was largely *position-stacking* (10 correlated
-  bets compounding in a bad regime). Cutting it to **4** turned the worst case to **−34%** in-sample *and*
-  raised OOS profit factor 1.09 → 1.21.
-
-| config (OOS Jan–Jun'26) | win | PF | return | maxDD |
-|---|---|---|---|---|
-| old: `0/0.5`, maxOpen 10 | 28% | 1.13 | +197% | 42% |
-| **current: `0.3/0.3`, maxOpen 4** | **53%** | **1.21** | **+119%** | **26%** |
+- **On the TRUE live universe (45 symbols, judged under LIVE_SIM) no config shows a full-range
+  edge.** The §2 sweep winner is the only combo positive on train AND OOS on both walk-forward
+  splits — at **thin PF 1.02–1.13**. The strong recent numbers (PF ~1.6–1.9, Apr'26→now) are the
+  current chop regime, not the expectation.
+- **The guardian's flip-exit cuts both ways**: net-negative across the full history (truncates
+  winners), net-positive in chop regimes — which is why every config decision must be judged with
+  `LIVE_SIM=true`, never the bare replay.
+- **`MAX_OPEN_POSITIONS=4` re-validated under LIVE_SIM (2026-06-10)**: 4 is the only value ✅both on
+  both splits; 6 and 8 flip negative and balloon max DD from ~40% to ~65% — extra slots only fill
+  in correlated signal bursts, the exact moments stacking hurts.
+- **Daily reality on a ~$1k account** (replay distribution): mean +0.2–0.7%/day depending on regime,
+  roughly **half of days red or flat**, typical day −1.7%..+4.5%, worst ~−5%. Profit concentrates in
+  a few good days — judge over weeks, not days.
 
 **What "safe" does and doesn't mean here:**
 - **Realized loss is ~1.1–1.3R, not exactly 1R** — slippage widens the stop distance from the fill, and
@@ -196,8 +199,10 @@ found:
 - **The live journal omits funding** on multi-day runners (equity is correct; per-trade R reads slightly
   optimistic).
 
-**Discipline:** forward-test on testnet first; go to mainnet only with `RISK_USDT=1`; scale only after a
-few dozen real trades confirm a positive, stable edge — and be willing to walk away if it isn't there.
+**Discipline:** live runs at 1% risk + the `$500` notional cap (the cap binds on tight ATR-1.5 stops,
+so EFFECTIVE risk per trade is ~0.3–0.5%). Scale risk and cap **as a pair** (cap ≈ 0.5× equity) only
+after ≥4 weeks AND ≥50 live trades AND the live↔LIVE_SIM parity check holds — and be willing to walk
+away if the edge isn't there.
 
 ---
 
@@ -218,11 +223,14 @@ Built in gated phases; each gate had to pass before advancing. Summary:
 | M8 | Live real money, tiny size | real +EV → scale |
 | M9 | Dashboard + ops (alerts, backups) | observable |
 
-**2026-06 improvements** (on top of M0–M9): restructured take-profits to `0.3/0.3` + trailing runner,
-removed the lifecycle timeouts, added the intra-minute guardian, and cut `MAX_OPEN_POSITIONS` 10 → 4. The
-exit engine is covered by deterministic assertions (`check-manage.ts`, 20/20) and was reviewed
-adversarially (one real bug fixed: a mid-tick broker error could leave a stale DB and let the guardian cut
-a locked runner — the decided state is now persisted before the fills execute).
+**2026-06 improvements** (on top of M0–M9): the intra-minute guardian; `MAX_OPEN_POSITIONS` 10 → 4;
+the 2026-06-10 sweep-winner config (ADX 35, ATR 1.5, TP `0/0.5`, time-stops 12/12 — see §2); live-money
+hardening from a full audit (partial-fill orphan guards, ambiguous-order recovery by clientOrderId,
+adopt-filled-entries, strict env flags, BNB-fee estimates); **LIVE_SIM** (the backtest replays the
+guardian + TP-at-close + live sizing caps — see §5) with `npm run sweep` for walk-forward config search;
+and a dashboard rebuilt around decision metrics (gross exposure, kill-switch proximity, by-close-reason,
+time-stop bar counts). The entry, exit, and indicator engines are covered by deterministic assertions
+(`check-detect.ts`, `check-manage.ts`, `check-ta.ts` — all green).
 
 ---
 
