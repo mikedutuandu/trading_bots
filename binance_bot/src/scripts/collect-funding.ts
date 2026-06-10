@@ -3,6 +3,7 @@ import { logger } from "../logger.js";
 import { binance } from "../exchange/binance.js";
 import { getFundingHistory } from "../exchange/marketData.js";
 import { getDb, closeDb } from "../storage/db.js";
+import { distinctSymbols } from "../storage/candles.js";
 import {
   earliestFundingTime,
   fundingCount,
@@ -19,14 +20,6 @@ import {
  *   npm run collect-funding
  */
 
-function dbSymbols(interval: string): string[] {
-  const db = getDb();
-  const rows = db
-    .prepare(`SELECT DISTINCT symbol FROM candles WHERE interval = ? ORDER BY symbol`)
-    .all(interval) as Array<{ symbol: string }>;
-  return rows.map((r) => r.symbol);
-}
-
 function candleSpan(interval: string): { from: number; to: number } {
   const db = getDb();
   const row = db
@@ -38,7 +31,7 @@ function candleSpan(interval: string): { from: number; to: number } {
 async function main(): Promise<void> {
   await binance.syncTime();
   const interval = config.strategy.timeframe;
-  const symbols = dbSymbols(interval);
+  const symbols = distinctSymbols(interval);
   if (symbols.length === 0) throw new Error("No candles in DB. Run `npm run collect` first.");
 
   const span = candleSpan(interval);

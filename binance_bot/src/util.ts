@@ -14,6 +14,12 @@ export const dayStartMs = (ms: number): number => Math.floor(ms / DAY_MS) * DAY_
 /** A position quantity at or below this is float dust — treat as flat. */
 export const QTY_DUST = 1e-9;
 
+/** Env var as a Date → ms epoch (e.g. FROM/TO/TRAIN_END=YYYY-MM-DD), undefined when unset. */
+export function envDateMs(key: string): number | undefined {
+  const v = process.env[key];
+  return v ? new Date(v).getTime() : undefined;
+}
+
 /** Timeframe string ("15m", "1h", "1d", "1w") → milliseconds. */
 export function intervalMs(timeframe: string): number {
   const m = /^(\d+)([mhdw])$/.exec(timeframe);

@@ -99,3 +99,11 @@ export function candleCount(symbol: string, interval: string): number {
     .get(symbol, interval) as { n: number };
   return row.n;
 }
+
+/** Every symbol that has candles stored for `interval` (the research-DB universe). */
+export function distinctSymbols(interval: string): string[] {
+  const rows = getDb()
+    .prepare(`SELECT DISTINCT symbol FROM candles WHERE interval = ? ORDER BY symbol`)
+    .all(interval) as Array<{ symbol: string }>;
+  return rows.map((r) => r.symbol);
+}

@@ -1,5 +1,7 @@
 import { config } from "../config.js";
 import { logger } from "../logger.js";
+import { envDateMs } from "../util.js";
+import { distinctSymbols } from "../storage/candles.js";
 import { getDb, closeDb } from "../storage/db.js";
 import { binance } from "../exchange/binance.js";
 import { getExchangeInfo, scopeSymbols } from "../exchange/marketData.js";
@@ -20,19 +22,6 @@ import { computeMetrics } from "../backtest/metrics.js";
  * playbook, not the safety layer. After picking a config, ALWAYS validate it with
  * `LIVE_SIM=true BACKTEST_SYMBOLS=env npm run backtest` to see what live would do to it.
  */
-
-function toMs(key: string): number | undefined {
-  const v = process.env[key];
-  return v ? new Date(v).getTime() : undefined;
-}
-
-function dbSymbols(interval: string): string[] {
-  const db = getDb();
-  const rows = db
-    .prepare(`SELECT DISTINCT symbol FROM candles WHERE interval = ? ORDER BY symbol`)
-    .all(interval) as Array<{ symbol: string }>;
-  return rows.map((r) => r.symbol);
-}
 
 
 // Parameter grid (kept modest to limit overfitting surface and runtime).
@@ -78,14 +67,14 @@ function buildCombos(): Combo[] {
 async function main(): Promise<void> {
   await binance.syncTime();
   await getExchangeInfo();
-  const symbols = scopeSymbols(dbSymbols(config.strategy.timeframe));
+  const symbols = scopeSymbols(distinctSymbols(config.strategy.timeframe));
   if (symbols.length === 0) throw new Error("No candles. Run `npm run collect` first.");
   logger.info(`universe: ${symbols.length} symbols${process.env.BACKTEST_SYMBOLS ? " (scoped by BACKTEST_SYMBOLS)" : ""}`);
 
-  const trainEnd = toMs("TRAIN_END");
+  const trainEnd = envDateMs("TRAIN_END");
   if (!trainEnd) throw new Error("Set TRAIN_END=YYYY-MM-DD for walk-forward optimization");
-  const from = toMs("FROM");
-  const to = toMs("TO");
+  const from = envDateMs("FROM");
+  const to = envDateMs("TO");
 
   const base: Omit<BacktestConfig, "from" | "to" | "params"> = {
     symbols,

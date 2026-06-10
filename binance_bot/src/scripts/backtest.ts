@@ -1,5 +1,7 @@
 import { config, envBool } from "../config.js";
 import { logger } from "../logger.js";
+import { envDateMs } from "../util.js";
+import { distinctSymbols } from "../storage/candles.js";
 import { getDb, closeDb } from "../storage/db.js";
 import { binance } from "../exchange/binance.js";
 import { getExchangeInfo, scopeSymbols } from "../exchange/marketData.js";
@@ -27,24 +29,11 @@ import { formatReport } from "../backtest/metrics.js";
  * with BACKTEST_SYMBOLS=env so both trade the same candidate set.
  */
 
-function toMs(key: string): number | undefined {
-  const v = process.env[key];
-  return v ? new Date(v).getTime() : undefined;
-}
-
-function dbSymbols(interval: string): string[] {
-  const db = getDb();
-  const rows = db
-    .prepare(`SELECT DISTINCT symbol FROM candles WHERE interval = ? ORDER BY symbol`)
-    .all(interval) as Array<{ symbol: string }>;
-  return rows.map((r) => r.symbol);
-}
-
 async function main(): Promise<void> {
   await binance.syncTime();
   await getExchangeInfo(); // warm the filter cache
 
-  const symbols = scopeSymbols(dbSymbols(config.strategy.timeframe));
+  const symbols = scopeSymbols(distinctSymbols(config.strategy.timeframe));
   if (symbols.length === 0) {
     throw new Error("No candles in DB. Run `npm run collect` first.");
   }
@@ -84,15 +73,15 @@ async function main(): Promise<void> {
       `trail=${params.trailMult}xATR risk=${(base.riskPct * 100).toFixed(2)}% lev=${base.leverage}x maxOpen=${base.maxOpenPositions}`,
   );
 
-  const trainEnd = toMs("TRAIN_END");
+  const trainEnd = envDateMs("TRAIN_END");
   if (trainEnd) {
     // Walk-forward: in-sample up to TRAIN_END, out-of-sample after.
-    const train = await runBacktest({ ...base, from: toMs("FROM"), to: trainEnd });
+    const train = await runBacktest({ ...base, from: envDateMs("FROM"), to: trainEnd });
     console.log(formatReport(train, "IN-SAMPLE (train)"));
-    const test = await runBacktest({ ...base, from: trainEnd, to: toMs("TO") });
+    const test = await runBacktest({ ...base, from: trainEnd, to: envDateMs("TO") });
     console.log(formatReport(test, "OUT-OF-SAMPLE (test) ⭐"));
   } else {
-    const result = await runBacktest({ ...base, from: toMs("FROM"), to: toMs("TO") });
+    const result = await runBacktest({ ...base, from: envDateMs("FROM"), to: envDateMs("TO") });
     console.log(formatReport(result, "full range"));
   }
 
