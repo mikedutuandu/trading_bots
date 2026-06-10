@@ -30,24 +30,32 @@ is net-negative and *crowds out* pullback's good trades, so it stays disabled.
 
 ## 2. Status & current config
 
-Built end-to-end (data → backtest → testnet → live plumbing) and tuned via a 2026-06 walk-forward grid.
-The current `.env` config:
+Live on mainnet (tiny size) since 2026-06-10. The config below is the **2026-06-10 sweep
+winner** (`npm run sweep`: 72 combos × 2 walk-forward splits on the live 45-symbol universe,
+finals judged under `LIVE_SIM` — the only combo positive on train AND OOS on both splits):
 
 | Knob | Value | Why |
 |---|---|---|
-| `TAKE1` / `TAKE2` | `0.3` / `0.3` | take 0.3 at +1R, 0.3 at +2R, **trail the last 0.4** |
+| `ADX_MIN` | `35` | selective entries — every robust sweep config used 35 (25 was −EV here) |
+| `ATR_MULT` | `1.5` | initial stop; with the guardian ACTIVE 1.5 beats 2.0 (flip-exit absorbs whipsaw) |
+| `TAKE1` / `TAKE2` | `0` / `0.5` | nothing at +1R, half at +2R, **trail the rest** — riders carry the edge |
+| `MAX_HOLD_BARS` / `STALL_BARS` | `12` / `12` | short time-stops pair with the selective ADX35 gate |
 | `TRAIL_MULT` | `3` | runner trails 3×ATR behind the peak (2× backtested worse) |
-| `ADX_MIN` | `25` | trend-strength gate (skip chop) |
-| `COOLDOWN` | `24` | bars to wait per symbol after a close |
-| `MAX_OPEN_POSITIONS` | `4` | caps correlated exposure — the **biggest risk lever** (see §6) |
-| `RISK_PCT` / `RISK_USDT` | `1%` / `0` | risk per trade (set `RISK_USDT=1` for the first real-money phase) |
+| `COOLDOWN` | `6` | bars to wait per symbol after a close |
+| `MAX_OPEN_POSITIONS` | `4` | caps correlated exposure — a top risk lever (see §6) |
+| `RISK_PCT` / `RISK_USDT` | `1%` / `0` | risk per trade |
+| `MAX_NOTIONAL_PER_TRADE` | `500` | hard cap ≈0.5× equity/leg — gap-through-stop loss scales with NOTIONAL, not planned risk; the risk-based sizer can otherwise blow notional past 2× equity on tight stops |
 | `LEVERAGE` | `10` | risk is set by the stop, not leverage; keep margin usage low |
 | `MAX_DAILY_LOSS_PCT` | `0.05` | kill switch — **halts new entries** past −5% on the day |
-| lifecycle timeouts | `0` (off) | the guardian + trend-flip close retire stale trades instead |
-| `MONITOR_ENABLED` | `true` | the intra-minute guardian (§4) |
-| `MONITOR_INTERVAL_MIN` | `1` | guardian checks open positions every minute |
-| `MONITOR_REVERSAL_MODE` | `exit` | auto-close on a 15m reversal (`off` / `warn` / `exit`) |
-| `MONITOR_REVERSAL_TF` | `15m` | timeframe for the reversal check |
+| `MONITOR_ENABLED` / `_INTERVAL_MIN` | `true` / `1` | the intra-minute guardian (§4) |
+| `MONITOR_REVERSAL_MODE` / `_TF` | `exit` / `15m` | auto-close on a 15m reversal (`off` / `warn` / `exit`) |
+
+**Walk-forward numbers** (LIVE_SIM, 45 symbols): split1 train +$33 / OOS +$134 (PF 1.13);
+split2 +$64 / +$53; Apr'26→now +$220, PF 1.62, DD 8.5%. **Daily expectations on a ~$1k
+account** (replay distribution, NOT a promise): recent regime mean ≈ +0.7%/day, median +0.2%,
+typical day −1.7%..+4.5%, worst −4.1%; the conservative longer window is mean +0.2%/day with
+only ~45% green days — profits concentrate in a few good days. The edge is THIN (WF PF
+1.02–1.13); the PF 1.62 is the current chop regime, don't anchor on it.
 
 ---
 
@@ -98,10 +106,11 @@ reasons so its impact can be measured.
 
 | Command | Purpose | DB |
 |---|---|---|
-| `npm run collect` | Download/cache 1h klines for the universe | `binance.sqlite` |
+| `npm run collect` | Download/cache 1h klines for the universe (`TIMEFRAME=15m` → 15m candles for LIVE_SIM) | `binance.sqlite` |
 | `npm run collect-funding` | Download 8h funding history (accurate backtest costs) | `binance.sqlite` |
-| `npm run backtest` | Replay candles through the engine; win%, expectancy, PF, maxDD, net of fees. `TRAIN_END=YYYY-MM-DD` → walk-forward | `binance.sqlite` |
-| `npm run optimize` | Walk-forward grid search (select on TRAIN, report TEST) | `binance.sqlite` |
+| `npm run backtest` | Replay candles through the engine; win%, expectancy, PF, maxDD, daily-PnL distribution, by-close-reason, net of fees. `TRAIN_END=YYYY-MM-DD` → walk-forward | `binance.sqlite` |
+| `npm run optimize` | Walk-forward grid search over playbook knobs (select on TRAIN, report TEST) | `binance.sqlite` |
+| `npm run sweep` | Walk-forward sweep over ATR_MULT × TP profile × time-stops × ADX (the levers optimize misses); honors `LIVE_SIM` | `binance.sqlite` |
 | `npm run testnet` | **Forward-test** — live engine on the demo venue: hourly tick + 1-min guardian | `testnet.sqlite` |
 | `npm run live` | Real money (mainnet). Refuses unless `ALLOW_LIVE=true` **and** `CONFIRM_LIVE=true` | `live.sqlite` |
 | `npm run dashboard:testnet` / `:live` | Read-only ops dashboard (localhost:8787 / :8788) | testnet / live |
@@ -112,6 +121,32 @@ reasons so its impact can be measured.
 
 Engine env flags (prefix a `testnet`/`live` run): `RUN_NOW=true`, `ONESHOT=true`, `DRY_RUN=true` (use a
 throwaway `DB_PATH`!), `NO_STREAM=true`.
+
+### Backtest ↔ live parity (LIVE_SIM) — how to make the replay match `npm run live`
+
+By default `npm run backtest` replays the PURE candle-close engine over EVERY symbol in the
+research DB — that is **not** what live does. Two flags close the gap (2026-06-10):
+
+```bash
+LIVE_SIM=true BACKTEST_SYMBOLS=env npm run backtest          # the closest replay of live
+LIVE_SIM=true BACKTEST_SYMBOLS=env EQUITY=1050 FROM=2026-06-10 npm run backtest  # vs your journal
+```
+
+- `BACKTEST_SYMBOLS=env` → trade only the live `SYMBOLS` universe, scanned in the same order
+  (slot contention picks the same winners). Default = all ~69 DB symbols, which flatters results.
+- `LIVE_SIM=true` → simulate the live execution overlay: the guardian's 15m trend-flip exit
+  (`REVERSAL_CLOSE`, pre-TP2 — the dominant live exit), intra-bar stop ordering, TP1/TP2 fills
+  at the bar CLOSE (live TPs are market orders on the tick), and the M8 sizing caps. Needs 15m
+  candles (`TIMEFRAME=15m npm run collect`). The flip predicate lives in ONE module
+  (`src/risk/guardian.ts`) shared by the live monitor and the sim, so they cannot drift.
+- What still differs (~5-10% noise): real per-order slippage vs the fixed 2bps, mark-vs-last
+  price stop triggers, ~15s entry latency, partial fills. Decisions match ~99%; per-trade
+  prices wobble; aggregates converge over 100+ trades.
+- **Judge every config with LIVE_SIM** — the guardian overlay flips verdicts (e.g. it is
+  net-negative across the full history but net-positive in chop regimes, and ATR 1.5 beats
+  2.0 only when the guardian is active). Parity check after a few live weeks: compare the
+  journal vs `LIVE_SIM=true BACKTEST_SYMBOLS=env FROM=<go-live date>` — trade count, win
+  rate, the **By close reason** mix, and net should land within ~10-15%.
 
 ---
 

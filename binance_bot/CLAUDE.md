@@ -8,11 +8,12 @@ Systematic Binance USDT-M perpetual futures bot (long/short, R-based risk), reve
 
 | Command | Purpose | DB |
 |---|---|---|
-| `npm run collect` | Download/cache 1h klines for the universe (uses the API). | `binance.sqlite` |
+| `npm run collect` | Download/cache 1h klines for the universe (uses the API). `TIMEFRAME=15m` → 15m candles (needed once for LIVE_SIM). | `binance.sqlite` |
 | `npm run collect-funding` | Download 8h funding history (for accurate backtest costs). | `binance.sqlite` |
 | `npm run universe` | Snapshot the current top-N by volume into a pinned list. | `binance.sqlite` |
-| `npm run backtest` | Replay candles through the engine; prints win%, expectancy, PF, maxDD, net of fees+funding. `TRAIN_END=YYYY-MM-DD` does a walk-forward (in-sample vs out-of-sample). | `binance.sqlite` |
-| `npm run optimize` | Walk-forward grid search (select on TRAIN, report TEST). | `binance.sqlite` |
+| `npm run backtest` | Replay candles through the engine; prints win%, expectancy, PF, maxDD, daily-PnL distribution, by-close-reason, net of fees+funding. `TRAIN_END=YYYY-MM-DD` does a walk-forward. **To compare with live, ALWAYS add `LIVE_SIM=true BACKTEST_SYMBOLS=env`** (guardian overlay + live universe + live sizing caps — see README §5); the bare default replays ALL DB symbols with no guardian and flatters results. | `binance.sqlite` |
+| `npm run optimize` | Walk-forward grid search over playbook knobs (select on TRAIN, report TEST). Pure engine by design — validate winners with LIVE_SIM afterwards. | `binance.sqlite` |
+| `npm run sweep` | Walk-forward sweep over ATR_MULT × TP profile × time-stops × ADX (the levers optimize misses); honors `LIVE_SIM` + `BACKTEST_SYMBOLS`. | `binance.sqlite` |
 | `npm run testnet` | **Forward-test** — runs the live engine against the test venue (real orders, no real money): a full tick hourly on candle close + an intra-minute guardian in between. | `testnet.sqlite` |
 | `npm run live` | Real money on mainnet. Refuses unless `ALLOW_LIVE=true` **and** `CONFIRM_LIVE=true`. | `live.sqlite` |
 | `npm run dashboard:testnet` / `dashboard:live` | Read-only ops dashboard (localhost:8787 / :8788). | testnet / live |
