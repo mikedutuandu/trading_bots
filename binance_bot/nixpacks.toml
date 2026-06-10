@@ -7,8 +7,8 @@
 # so the default `npm run build` (tsc) is replaced with a no-op here.
 #
 # Set the actual process in Railway → Settings → Deploy → Custom Start Command, e.g.:
-#   npm run xsmom-live:loop     # funding-carry executor (in-code 24/7 loop)
-#   npm run live                # trend-pullback engine
+#   npm run live                # trend-pullback engine (mainnet, gated by ALLOW_LIVE+CONFIRM_LIVE)
+#   npm run testnet             # demo forward-test
 # (the line below is just the default if no custom start command is set.)
 
 [phases.install]
@@ -18,4 +18,4 @@ cmds = ["npm ci"]
 cmds = ["true"] # no build — tsx runs the .ts sources directly
 
 [start]
-cmd = "npm run xsmom-live:loop"
+cmd = "npm run live"
