@@ -13,3 +13,12 @@ export const dayStartMs = (ms: number): number => Math.floor(ms / DAY_MS) * DAY_
 
 /** A position quantity at or below this is float dust — treat as flat. */
 export const QTY_DUST = 1e-9;
+
+/** Timeframe string ("15m", "1h", "1d", "1w") → milliseconds. */
+export function intervalMs(timeframe: string): number {
+  const m = /^(\d+)([mhdw])$/.exec(timeframe);
+  if (!m) throw new Error(`Unsupported timeframe: ${timeframe}`);
+  const n = Number(m[1]);
+  const unit = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }[m[2]!]!;
+  return n * unit;
+}

@@ -14,6 +14,11 @@ import { computeMetrics } from "../backtest/metrics.js";
  * set can't masquerade as an edge. Selection is by TRAIN performance only.
  *
  *   TRAIN_END=2025-12-01 npm run optimize
+ *   BACKTEST_SYMBOLS=env TRAIN_END=… npm run optimize   # tune on the live universe
+ *
+ * Deliberately runs the PURE engine (no LIVE_SIM guardian overlay) — the grid tunes the
+ * playbook, not the safety layer. After picking a config, ALWAYS validate it with
+ * `LIVE_SIM=true BACKTEST_SYMBOLS=env npm run backtest` to see what live would do to it.
  */
 
 function toMs(key: string): number | undefined {

@@ -5,7 +5,8 @@ import { loadPositions } from "../storage/positions.js";
 import { getEquityCurve, getMeta, getMetaNum } from "../storage/engineState.js";
 import { metricsFromTrades, groupBy } from "../backtest/metrics.js";
 import { getMarkPrices } from "../exchange/marketData.js";
-import { intervalMs, parseMonitorStatus } from "../engine/loop.js";
+import { intervalMs } from "../util.js";
+import { parseMonitorStatus } from "../engine/loop.js";
 
 /** The bot's configured behaviour — so the dashboard shows WHAT it's set to do. */
 function context() {

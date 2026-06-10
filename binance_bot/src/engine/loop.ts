@@ -1,6 +1,6 @@
 import { config } from "../config.js";
 import { logger } from "../logger.js";
-import { QTY_DUST, dayKey, dayStartMs, sleep } from "../util.js";
+import { QTY_DUST, dayKey, dayStartMs, intervalMs, sleep } from "../util.js";
 import type { Candle, Side, SymbolFilter, Trade } from "../types.js";
 import { AmbiguousOrderError, binance, briefError } from "../exchange/binance.js";
 import { getKlines, getMarkPrice, getMarkPrices } from "../exchange/marketData.js";
@@ -8,6 +8,7 @@ import { computeIndicators } from "../playbooks/index.js";
 import type { IndicatorCtx, Playbook, StrategyParams } from "../playbooks/types.js";
 import { sizePosition, splitTranches, type SizingOpts } from "../risk/sizing.js";
 import { closeReasonOf, manageOnCandle, type RuntimePosition } from "../risk/manage.js";
+import { EMA_WARMUP_BARS, againstPosition, fasterTfUp } from "../risk/guardian.js";
 import { saveTrade, lastCloseTime, getClosedSince } from "../storage/trades.js";
 import { getDb } from "../storage/db.js";
 import {
@@ -53,14 +54,6 @@ export interface EngineDeps {
 const EIGHT_H = 8 * 60 * 60 * 1000;
 const LAST_TICK_KEY = "engine:lastTickTime";
 
-export function intervalMs(timeframe: string): number {
-  const m = /^(\d+)([mhdw])$/.exec(timeframe);
-  if (!m) throw new Error(`Unsupported timeframe: ${timeframe}`);
-  const n = Number(m[1]);
-  const unit = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }[m[2]!]!;
-  return n * unit;
-}
-
 interface SymbolData {
   candles: Candle[];
   ind: IndicatorCtx;
@@ -77,7 +70,7 @@ async function fetchSymbolData(
 ): Promise<SymbolData | null> {
   const raw = await getKlines(symbol, timeframe, { limit: 320 });
   const candles = raw.filter((c) => c.closeTime <= now); // only fully-closed candles
-  if (candles.length < 250) return null; // need EMA200 warmup
+  if (candles.length < EMA_WARMUP_BARS) return null; // need EMA200 warmup
   const idx = candles.length - 1;
   return {
     candles,
@@ -611,7 +604,7 @@ async function fasterTfUptrend(symbol: string, donchianPeriod: number): Promise<
     if (ema50 === undefined || ema200 === undefined || Number.isNaN(ema50) || Number.isNaN(ema200)) {
       return null;
     }
-    cached = { boundary, uptrend: ema50 > ema200 };
+    cached = { boundary, uptrend: fasterTfUp(ema50, ema200) };
     reversalTrend.set(symbol, cached);
   }
   return cached.uptrend;
@@ -680,7 +673,7 @@ async function guardPosition(
     return { up: null, against: false };
   }
   const up = await fasterTfUptrend(symbol, deps.params.donchianPeriod);
-  const against = up !== null && (long ? !up : up); // long against = downtrend; short against = uptrend
+  const against = up !== null && againstPosition(up, long); // long against = downtrend; short against = uptrend
   if (against && config.monitor.reversalMode === "exit") {
     await guardianClose(broker, deps, ep, markPrice, "REVERSAL_CLOSE", `${config.monitor.reversalTf} trend flipped against ${ep.pos.side}`);
     return null;

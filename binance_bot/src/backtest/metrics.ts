@@ -127,6 +127,14 @@ export function formatReport(result: BacktestResult, label: string): string {
     lines.push(`  ${k.padEnd(16)} ${String(g.trades).padStart(4)} trades  ${pct(g.wins / g.trades).padStart(6)} win  ${usd(g.netPnl).padStart(10)} USDT`);
   }
 
+  // Per close reason — the live↔backtest parity lens (e.g. REVERSAL_CLOSE only exists
+  // with LIVE_SIM; its share should roughly match the live journal's).
+  const byReason = groupBy(result.trades, (t) => t.closeReason ?? "?");
+  lines.push(`\nBy close reason:`);
+  for (const [k, g] of [...byReason.entries()].sort((a, b) => b[1].trades - a[1].trades)) {
+    lines.push(`  ${k.padEnd(16)} ${String(g.trades).padStart(4)} trades  ${pct(g.wins / g.trades).padStart(6)} win  ${usd(g.netPnl).padStart(10)} USDT`);
+  }
+
   // Per-month
   const byMonth = groupBy(result.trades, (t) => new Date(t.closedAt ?? t.openedAt).toISOString().slice(0, 7) as string);
   lines.push(`\nBy month:`);

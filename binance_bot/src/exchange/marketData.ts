@@ -249,5 +249,8 @@ export function scopeSymbols(all: string[]): string[] {
   );
   const missing = [...wanted].filter((s) => !all.includes(s));
   if (missing.length) logger.warn(`BACKTEST_SYMBOLS: ${missing.length} symbol(s) have no candles in the DB: ${missing.join(", ")}`);
-  return all.filter((s) => wanted.has(s));
+  // Preserve the WANTED order (= the live SYMBOLS order): with several signals competing
+  // for MAX_OPEN_POSITIONS slots, the live engine scans in SYMBOLS order — matching it
+  // makes slot contention pick the same winners as live.
+  return [...wanted].filter((s) => all.includes(s));
 }
