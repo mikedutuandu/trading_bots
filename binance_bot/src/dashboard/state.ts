@@ -8,25 +8,40 @@ import { getMarkPrices } from "../exchange/marketData.js";
 import { paramsFromEnv } from "../playbooks/paramsFromEnv.js";
 import { parseMonitorStatus } from "../engine/loop.js";
 
-/** The bot's configured behaviour — so the dashboard shows WHAT it's set to do.
- *  Prefers the params the ENGINE stamped at startup (engine:params): the engine is a
- *  separate process whose env can differ from ours. Falls back to our own env (same
- *  .env file) for data written before the stamp existed. */
-function context() {
-  const r = config.risk;
+/** The engine's EFFECTIVE strategy knobs: prefers what the engine stamped at startup
+ *  (engine:params — its env can differ from ours); falls back to OUR env (same .env)
+ *  for data written before the stamp existed. `hasStamp` lets the UI mark fallbacks. */
+function effectiveParams() {
   let stamped: Record<string, unknown> = {};
   try {
     stamped = JSON.parse(getMeta("engine:params") ?? "{}") as Record<string, unknown>;
   } catch {
     /* corrupt/absent stamp → fall back to env */
   }
-  // Fallback covers data written before the stamp existed — but until the engine's NEXT
-  // start writes the stamp, these are OUR env values, which an inline-override engine run
-  // would not match. Surface that uncertainty instead of presenting env as truth.
-  const hasStamp = typeof stamped.adxMin === "number";
   const fb = paramsFromEnv();
   const n = (k: string, fallback: number): number => (typeof stamped[k] === "number" ? (stamped[k] as number) : fallback);
-  const maxNotional = n("maxNotional", r.maxNotionalPerTrade);
+  return {
+    hasStamp: typeof stamped.adxMin === "number",
+    adxMin: n("adxMin", fb.adxMin),
+    atrMult: n("atrMult", fb.atrStopMult),
+    take1: n("take1", fb.takeFrac1),
+    take2: n("take2", fb.takeFrac2),
+    trailMult: n("trailMult", fb.trailMult),
+    cooldown: n("cooldown", fb.cooldownBars),
+    maxHold: n("maxHold", fb.maxHoldBars),
+    stall: n("stall", fb.stallBars),
+    maxTotal: fb.maxTotalBars,
+    maxNotional: n("maxNotional", config.risk.maxNotionalPerTrade),
+    reversalMode: (stamped.reversalMode as string) ?? config.monitor.reversalMode,
+    reversalTf: (stamped.reversalTf as string) ?? config.monitor.reversalTf,
+    playbooks: (stamped.playbooks as string) ?? process.env.PLAYBOOKS ?? "trend-pullback",
+  };
+}
+
+/** The bot's configured behaviour — so the dashboard shows WHAT it's set to do. */
+function context(p: ReturnType<typeof effectiveParams>) {
+  const r = config.risk;
+  const { hasStamp, maxNotional } = p;
   return {
     risk: r.riskUsdt > 0 ? `${r.riskUsdt} USDT` : `${(r.riskPct * 100).toFixed(2)}%`,
     leverage: r.leverage,
@@ -37,14 +52,13 @@ function context() {
       config.universe.mode === "static"
         ? `${config.universe.symbols.length} static`
         : `top ${config.universe.size} dynamic`,
-    playbooks: (stamped.playbooks as string) ?? process.env.PLAYBOOKS ?? "trend-pullback",
+    playbooks: p.playbooks,
     strategy:
-      `ADX≥${n("adxMin", fb.adxMin)} · ATR×${n("atrMult", fb.atrStopMult)} · ` +
-      `TP ${n("take1", fb.takeFrac1)}/${n("take2", fb.takeFrac2)} · hold ${n("maxHold", fb.maxHoldBars)}/${n("stall", fb.stallBars)} · ` +
-      `trail ${n("trailMult", fb.trailMult)}× · cd ${n("cooldown", fb.cooldownBars)}` +
+      `ADX≥${p.adxMin} · ATR×${p.atrMult} · TP ${p.take1}/${p.take2} · hold ${p.maxHold}/${p.stall} · ` +
+      `trail ${p.trailMult}× · cd ${p.cooldown}` +
       (hasStamp ? "" : " (env — engine hasn't stamped yet)"),
     maxNotional: maxNotional > 0 ? maxNotional : null,
-    guardian: `${(stamped.reversalMode as string) ?? config.monitor.reversalMode}@${(stamped.reversalTf as string) ?? config.monitor.reversalTf}`,
+    guardian: `${p.reversalMode}@${p.reversalTf}`,
   };
 }
 
@@ -129,12 +143,30 @@ export async function buildState(windowMs?: number) {
   const dayOpen = dayStartEquity(Date.now(), latestEquity);
   const dayDdPct = dayOpen > 0 ? Math.max(0, (dayOpen - latestEquity) / dayOpen) : 0;
 
+  const params = effectiveParams();
   const openPositions = open.map((p) => {
     const mark = marks.get(p.symbol) ?? null;
     const sign = p.pos.side === "long" ? 1 : -1;
     // Live mark-to-market on the remaining qty (matches Binance's Unrealized PNL).
     const unrealizedPnl = mark === null ? null : sign * (mark - p.pos.entry) * p.pos.qtyRemaining;
+    // Time-stop progress, counted EXACTLY like the engine: closed bars between the
+    // signal candle's open and the last PROCESSED candle's open (evaluated hourly —
+    // so a "12-bar" limit closes at ~13h of wall-clock Age, not 12h).
+    const heldBars = lastTick !== null ? Math.max(0, Math.round((lastTick - p.openedAtBarTime) / barMs)) : null;
+    const holdLimit = p.pos.tp2Hit
+      ? params.maxTotal > 0
+        ? params.maxTotal
+        : null
+      : p.pos.tp1Hit
+        ? params.stall > 0
+          ? params.stall
+          : null
+        : params.maxHold > 0
+          ? params.maxHold
+          : null;
     return {
+      heldBars,
+      holdLimit, // bars until the applicable time-stop (maxHold pre-TP1 / stall pre-TP2 / maxTotal), null = off
       symbol: p.symbol,
       side: p.pos.side,
       playbook: p.playbook,
@@ -166,7 +198,7 @@ export async function buildState(windowMs?: number) {
     now: Date.now(),
     timeframe: config.strategy.timeframe,
     venue: getMeta("engine:label") ?? "—", // TESTNET | LIVE — which run wrote this data
-    context: context(),
+    context: context(params),
     today: { trades: todays.length, netPnl: todayPnl },
     unrealizedPnl, // live floating PnL of open positions (null = marks unavailable)
     grossExposure, // Σ |notional| of open positions — what a gap actually hits

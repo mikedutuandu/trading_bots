@@ -113,7 +113,7 @@ const PAGE = `<!doctype html>
   <div class="kpis" id="kpis"></div>
   <section><h2>Equity</h2><div class="card"><svg id="chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg><div class="hint" id="chartrange" style="margin:6px 0 0"></div></div></section>
   <section><h2>Open positions</h2>
-    <div class="hint">Max loss = booked PnL + remaining leg at the current Stop (≈0 once at breakeven) · R now = (booked + live float) ÷ planned risk — comparable to the closed table's R · Notional = remaining exposure (what a gap actually hits; the engine caps it per trade) · TP: BE = TP1 touched → stop to breakeven (nothing taken when TAKE1=0) · TP1✓/TP2 = partial banked · Monitor = intra-minute guardian · ✓/⚠ = 15m trend with/against you (auto-closes in exit mode) · trail = TP2 runner on the trailing stop · — = 15m not assessed yet</div>
+    <div class="hint">Max loss = booked PnL + remaining leg at the current Stop (≈0 once at breakeven) · R now = (booked + live float) ÷ planned risk — comparable to the closed table's R · Notional = remaining exposure (what a gap actually hits; the engine caps it per trade) · TP: BE = TP1 touched → stop to breakeven (nothing taken when TAKE1=0) · TP1✓/TP2 = partial banked · Monitor = intra-minute guardian · ✓/⚠ = 15m trend with/against you (auto-closes in exit mode) · trail = TP2 runner on the trailing stop · — = 15m not assessed yet · Age (held/limit bars): time-stops count CLOSED 1h bars at the hourly tick — a 12-bar limit closes at ~13h wall-clock</div>
     <div class="card"><table id="open"></table></div></section>
   <section><h2>By close reason</h2>
     <div class="hint">The live↔backtest parity lens — compare with <code>LIVE_SIM=true BACKTEST_SYMBOLS=env</code> replays. REVERSAL_CLOSE / GUARDIAN_STOP are guardian-only exits.</div>
@@ -243,7 +243,7 @@ async function tick() {
         +'<td class="'+(rNow==null?'muted':sign(rNow))+'">'+(rNow==null?'—':(rNow>=0?'+':'')+rNow.toFixed(2)+'R')+'</td>'
         +'<td>'+tpCell+'</td>'
         + monCell
-        +'<td class="muted">'+ago(s.now-p.openedAt)+'</td></tr>';
+        +'<td class="muted">'+ago(s.now-p.openedAt)+(p.heldBars!=null?' ('+p.heldBars+(p.holdLimit?'/'+p.holdLimit:'')+' bars)':'')+'</td></tr>';
     }));
 
   table('reasons', ['Reason','Trades','Win rate','Net PnL'],
