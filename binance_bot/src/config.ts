@@ -20,13 +20,17 @@ function int(key: string, fallback: number): number {
   return n;
 }
 
-function bool(key: string, fallback: boolean): boolean {
+/** Strict env boolean: accepts 1/true/yes/y and 0/false/no/n (any case), THROWS on
+ *  anything else. Exported so runtime flags (DRY_RUN etc.) can't silently flip the
+ *  dangerous way on a casing typo (e.g. DRY_RUN=True under exact-match → real orders). */
+export function envBool(key: string, fallback: boolean): boolean {
   const raw = (process.env[key] ?? "").toLowerCase().trim();
   if (raw === "") return fallback;
   if (["1", "true", "yes", "y"].includes(raw)) return true;
   if (["0", "false", "no", "n"].includes(raw)) return false;
   throw new Error(`Invalid bool for ${key}: ${raw}`);
 }
+const bool = envBool;
 
 function list(key: string): string[] {
   return (process.env[key] ?? "")

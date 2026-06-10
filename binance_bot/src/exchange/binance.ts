@@ -29,6 +29,24 @@ export function isBinanceCode(err: unknown, code: number): boolean {
   return err instanceof BinanceApiError && err.code === code;
 }
 
+/** An order-placing POST failed in a way where the order MAY still have executed
+ *  (network error reading the response, or a 5xx after the engine processed it).
+ *  Callers must verify by client order id instead of retrying — a blind re-POST of a
+ *  filled MARKET order would double the position. */
+export class AmbiguousOrderError extends Error {
+  constructor(message: string, readonly underlying?: unknown) {
+    super(message);
+    this.name = "AmbiguousOrderError";
+  }
+}
+
+/** Paths whose POSTs place POSITION-CHANGING orders: never blind-retried on ambiguous
+ *  failures (a duplicate MARKET fill doubles the position). /fapi/v1/algoOrder is
+ *  deliberately NOT here: its closePosition=true protective stops are auto-sized, so a
+ *  duplicate is benign — while a MISSING stop (placement dropped on a transient blip with
+ *  no retry) is the dangerous failure mode for a leveraged position. */
+const ORDER_POST_PATHS = new Set(["/fapi/v1/order"]);
+
 /** One-line, stack-free description of any error for logs (e.g. "-4131 The counterparty's…"). */
 export function briefError(err: unknown): string {
   if (err instanceof BinanceApiError) return `${err.code ?? err.status} ${err.apiMsg}`.trim();
@@ -97,6 +115,12 @@ async function request<T>(
   // Best-effort callers (e.g. the dashboard's mark price) can ask for a single quiet
   // attempt — they re-poll often, so retrying/backing-off/logging just adds lag + noise.
   const maxRetries = opts.retries ?? MAX_RETRIES;
+  // An order-placing POST that dies AFTER the exchange may have processed it (network
+  // error reading the response, or a 5xx — Binance documents 5xx as "execution status
+  // UNKNOWN") must NOT be blind-retried: a second POST of a filled MARKET order doubles
+  // the position. Surface AmbiguousOrderError so the caller verifies by client order id.
+  // 429/418 (rate-limited, definitely rejected before execution) stay retryable.
+  const ambiguousNotRetryable = method === "POST" && ORDER_POST_PATHS.has(path);
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     let query = buildQuery(params);
     if (signed) {
@@ -110,6 +134,9 @@ async function request<T>(
     try {
       res = await rawFetch(method, path, query, signed);
     } catch (err) {
+      if (ambiguousNotRetryable) {
+        throw new AmbiguousOrderError(`network error on ${method} ${path} — order may have executed`, err);
+      }
       if (!opts.quiet) logger.warn(`network error on ${path} (attempt ${attempt}):`, err);
       if (attempt < maxRetries) await sleep(backoff(attempt));
       continue;
@@ -125,6 +152,9 @@ async function request<T>(
     const body = await res.text();
     // 418/429 = rate limited, 5xx = transient → retry with backoff
     if (res.status === 429 || res.status === 418 || res.status >= 500) {
+      if (res.status >= 500 && ambiguousNotRetryable) {
+        throw new AmbiguousOrderError(`HTTP ${res.status} on ${method} ${path} — order may have executed: ${body}`);
+      }
       const retryAfter = Number(res.headers.get("retry-after") ?? 0) * 1000;
       if (!opts.quiet) logger.warn(`HTTP ${res.status} on ${path} (attempt ${attempt}): ${body}`);
       await sleep(Math.max(retryAfter, backoff(attempt)));

@@ -235,3 +235,19 @@ export async function getUniverse(): Promise<string[]> {
   logger.debug(`universe: ${ranked.length} symbols (dynamic top ${config.universe.size})`);
   return ranked;
 }
+
+/**
+ * Research-universe scope shared by backtest/optimize: narrow an all-DB symbol list via
+ * BACKTEST_SYMBOLS — "env" → the live SYMBOLS list, else a comma list; unset → unchanged
+ * (every symbol in the research DB, which is WIDER than what the live engine trades).
+ */
+export function scopeSymbols(all: string[]): string[] {
+  const raw = process.env.BACKTEST_SYMBOLS?.trim();
+  if (!raw) return all;
+  const wanted = new Set(
+    raw.toLowerCase() === "env" ? config.universe.symbols : raw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean),
+  );
+  const missing = [...wanted].filter((s) => !all.includes(s));
+  if (missing.length) logger.warn(`BACKTEST_SYMBOLS: ${missing.length} symbol(s) have no candles in the DB: ${missing.join(", ")}`);
+  return all.filter((s) => wanted.has(s));
+}

@@ -2,7 +2,7 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { getDb, closeDb } from "../storage/db.js";
 import { binance } from "../exchange/binance.js";
-import { getExchangeInfo } from "../exchange/marketData.js";
+import { getExchangeInfo, scopeSymbols } from "../exchange/marketData.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
 import { DEFAULT_PARAMS, type StrategyParams } from "../playbooks/types.js";
 import { runBacktest, type BacktestConfig } from "../backtest/runner.js";
@@ -28,6 +28,7 @@ function dbSymbols(interval: string): string[] {
     .all(interval) as Array<{ symbol: string }>;
   return rows.map((r) => r.symbol);
 }
+
 
 // Parameter grid (kept modest to limit overfitting surface and runtime).
 const GRID = {
@@ -72,8 +73,9 @@ function buildCombos(): Combo[] {
 async function main(): Promise<void> {
   await binance.syncTime();
   await getExchangeInfo();
-  const symbols = dbSymbols(config.strategy.timeframe);
+  const symbols = scopeSymbols(dbSymbols(config.strategy.timeframe));
   if (symbols.length === 0) throw new Error("No candles. Run `npm run collect` first.");
+  logger.info(`universe: ${symbols.length} symbols${process.env.BACKTEST_SYMBOLS ? " (scoped by BACKTEST_SYMBOLS)" : ""}`);
 
   const trainEnd = toMs("TRAIN_END");
   if (!trainEnd) throw new Error("Set TRAIN_END=YYYY-MM-DD for walk-forward optimization");

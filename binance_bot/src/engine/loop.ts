@@ -1,8 +1,8 @@
 import { config } from "../config.js";
 import { logger } from "../logger.js";
-import { dayKey, dayStartMs, sleep } from "../util.js";
+import { QTY_DUST, dayKey, dayStartMs, sleep } from "../util.js";
 import type { Candle, Side, SymbolFilter, Trade } from "../types.js";
-import { binance, briefError } from "../exchange/binance.js";
+import { AmbiguousOrderError, binance, briefError } from "../exchange/binance.js";
 import { getKlines, getMarkPrice, getMarkPrices } from "../exchange/marketData.js";
 import { computeIndicators } from "../playbooks/index.js";
 import type { IndicatorCtx, Playbook, StrategyParams } from "../playbooks/types.js";
@@ -16,7 +16,7 @@ import {
   savePosition,
   type EnginePosition,
 } from "../storage/positions.js";
-import { lastFill } from "../exchange/orders.js";
+import { FilledButUnreadableError, estimateTakerFee, lastFill } from "../exchange/orders.js";
 import {
   dayStartEquity,
   getMeta,
@@ -163,6 +163,12 @@ function finalizeClose(
   leverage: number,
   timeframe: string,
 ): void {
+  // Backstop for ALL close paths (callers guard too): finalizing with qty still open
+  // would delete the tracked row and orphan the remainder on the exchange. Throwing
+  // here keeps the position tracked (per-symbol catch) instead of silently orphaning.
+  if (ep.pos.qtyRemaining > QTY_DUST) {
+    throw new Error(`refusing to finalize ${ep.symbol} with qty ${ep.pos.qtyRemaining} still open`);
+  }
   const trade = buildClosedTrade(ep, exitPrice, reason, closedAt, leverage, timeframe);
   // Journal + drop the runtime row ATOMICALLY: a failure between the two would
   // otherwise leave the position journaled-but-not-deleted (re-journaled next pass →
@@ -292,7 +298,7 @@ async function reconcileFlat(
       exitPrice = f.price;
       exitFee = f.commission;
     } else {
-      exitFee = config.risk.takerFee * exitPrice * ep.pos.qtyRemaining; // estimate; the stop fill is a taker order
+      exitFee = estimateTakerFee(exitPrice, ep.pos.qtyRemaining); // estimate; the stop fill is a taker order
     }
   }
   const reason = ep.pos.tp1Hit ? "MANAGED_STOP" : "STOP";
@@ -342,7 +348,7 @@ async function managePosition(
   // (One-directional sync left an under-tracked qty — e.g. from a legacy un-rounded
   // tranche or a partial fill — uncorrectable, drifting funding/PnL.)
   const exchangeQty = Math.abs(bpos.qty);
-  if (Math.abs(exchangeQty - ep.pos.qtyRemaining) > 1e-9) {
+  if (Math.abs(exchangeQty - ep.pos.qtyRemaining) > QTY_DUST) {
     logger.warn(`${symbol}: tracked qty ${ep.pos.qtyRemaining} ≠ exchange ${exchangeQty}; syncing to exchange`);
     ep.pos.qtyRemaining = exchangeQty;
   }
@@ -381,6 +387,19 @@ async function managePosition(
   }
 
   if (closed) {
+    // Partial fill on the close (illiquid book / fill smaller than planned): keep the
+    // position tracked AND keep its resting protective stop, then let the next tick or
+    // the guardian retry — never finalize (delete) with qty still open, which would
+    // orphan the remainder on the exchange with its stop cancelled. (Same guard as
+    // guardianClose.)
+    if (ep.pos.qtyRemaining > QTY_DUST) {
+      logger.warn(
+        `${symbol}: close ${fills[fills.length - 1]!.kind} partially filled — ${ep.pos.qtyRemaining} still open, keeping tracked + protected`,
+      );
+      void notifyEvent("error", `${symbol}: close partially filled — ${ep.pos.qtyRemaining} still open; will retry next tick`);
+      savePosition(ep);
+      return;
+    }
     const reason = closeReasonOf(fills[fills.length - 1]!.kind);
     const exitPrice = fills[fills.length - 1]!.price;
     await broker.clearProtectiveStop(symbol, ep.protectiveStopId);
@@ -438,7 +457,35 @@ async function tryEnter(
     if (!sized) continue;
 
     await broker.prepareSymbol(symbol, deps.leverage);
-    const fill = await broker.marketOpen(symbol, signal.side, sized.qty, sized.entry);
+    let fill: Awaited<ReturnType<Broker["marketOpen"]>>;
+    try {
+      fill = await broker.marketOpen(symbol, signal.side, sized.qty, sized.entry);
+    } catch (err) {
+      // Adoption guard — ONLY when the order may actually have executed:
+      //   AmbiguousOrderError      = POST died mid-flight, fill unknown
+      //   FilledButUnreadableError = order executed, fill price unreadable
+      // Deterministic rejections (-2019 margin, -1111 precision, qty-rounds-to-0, …) mean
+      // the order NEVER executed — adopting there could seize a PRE-EXISTING untracked /
+      // manual position (bypassing risk caps and force-managing the operator's trade).
+      if (!(err instanceof AmbiguousOrderError) && !(err instanceof FilledButUnreadableError)) throw err;
+      // Ask the exchange: a same-side position no bigger than what WE sent = our fill —
+      // ADOPT it (track + stop) instead of leaving an invisible, stop-less position
+      // (the 2026-06 orphan incident class). Exchange flat → genuinely skipped; bigger
+      // than our order → a pre-existing position we must NOT seize (alert, leave alone).
+      const bpos = await broker.getPosition(symbol).catch(() => null);
+      if (!bpos || bpos.side !== signal.side || Math.abs(bpos.qty) <= 0) throw err;
+      const qty = Math.abs(bpos.qty);
+      if (qty > sized.qty + filter.stepSize) {
+        logger.warn(`${symbol}: exchange holds ${qty} ${signal.side} (> our ${sized.qty}) — pre-existing untracked position, NOT adopting`);
+        void notifyEvent("error", `${symbol}: untracked ${signal.side} qty ${qty} on exchange (bot sent ${sized.qty}) — not managed by the bot, verify manually`);
+        throw err;
+      }
+      const f = broker.kind === "live" ? await lastFill(symbol).catch(() => null) : null;
+      const price = f?.price ?? (bpos.entry > 0 ? bpos.entry : sized.entry);
+      fill = { qty, price, commission: f?.commission ?? estimateTakerFee(price, qty) };
+      logger.warn(`${symbol}: entry threw but exchange shows ${signal.side} qty=${qty} filled — adopting (${briefError(err)})`);
+      void notifyEvent("error", `${symbol} entry threw but FILLED on exchange — adopted ${signal.side} qty ${qty} @ ${price}`);
+    }
 
     // Step-rounded TP tranches off the ACTUAL fill qty (shared with the backtest).
     const { qtyTp1, qtyTp2 } = splitTranches(
@@ -585,7 +632,7 @@ async function guardianClose(
   // Partial fill (illiquid book / stop fired mid-pass): keep the position tracked and
   // protected and retry next pass — never finalize (delete) with qty still open, which
   // would orphan the remainder on the exchange.
-  if (ep.pos.qtyRemaining > 1e-9) {
+  if (ep.pos.qtyRemaining > QTY_DUST) {
     logger.warn(`GUARDIAN ${reason} ${ep.symbol}: partial fill ${res.qty}, ${ep.pos.qtyRemaining} left — retry next pass`);
     savePosition(ep);
     return;
@@ -610,7 +657,7 @@ async function guardPosition(
   if (await reconcileFlat(broker, deps, ep, bpos, Date.now())) return null;
   // Keep tracked qty aligned with exchange truth (bidirectional).
   const exchangeQty = Math.abs(bpos.qty);
-  if (Math.abs(exchangeQty - ep.pos.qtyRemaining) > 1e-9) {
+  if (Math.abs(exchangeQty - ep.pos.qtyRemaining) > QTY_DUST) {
     ep.pos.qtyRemaining = exchangeQty;
     savePosition(ep);
   }

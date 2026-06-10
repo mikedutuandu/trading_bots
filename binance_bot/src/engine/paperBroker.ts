@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import type { Side } from "../types.js";
+import { QTY_DUST } from "../util.js";
 import type { Broker, BrokerPosition, ExecResult } from "./broker.js";
 
 /**
@@ -53,7 +54,7 @@ export class PaperBroker implements Broker {
     if (p) {
       realized = side === "long" ? (price - p.entry) * fillQty : (p.entry - price) * fillQty;
       p.qty -= fillQty;
-      if (p.qty <= 1e-9) this.positions.delete(symbol);
+      if (p.qty <= QTY_DUST) this.positions.delete(symbol);
     }
     this.equity += realized - commission;
     return { price, qty: fillQty, commission };

@@ -2,7 +2,7 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { getDb, closeDb } from "../storage/db.js";
 import { binance } from "../exchange/binance.js";
-import { getExchangeInfo } from "../exchange/marketData.js";
+import { getExchangeInfo, scopeSymbols } from "../exchange/marketData.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
 import { envNum, paramsFromEnv } from "../playbooks/paramsFromEnv.js";
 import { runBacktest, type BacktestConfig } from "../backtest/runner.js";
@@ -16,6 +16,12 @@ import { formatReport } from "../backtest/metrics.js";
  *   FROM=2025-01-01 TO=2025-06-01 npm run backtest
  *   TRAIN_END=2025-09-01 npm run backtest      # walk-forward: train vs out-of-sample
  *   ATR_MULT=2 ADX_MIN=25 npm run backtest
+ *   BACKTEST_SYMBOLS=env npm run backtest      # replay ONLY the live SYMBOLS universe
+ *   BACKTEST_SYMBOLS=BTCUSDT,ETHUSDT npm run backtest   # or an explicit list
+ *
+ * NOTE: by default the replay covers EVERY symbol in the research DB (~69) — a WIDER
+ * universe than the live engine's SYMBOLS list. To compare against live results, run
+ * with BACKTEST_SYMBOLS=env so both trade the same candidate set.
  */
 
 function toMs(key: string): number | undefined {
@@ -35,10 +41,11 @@ async function main(): Promise<void> {
   await binance.syncTime();
   await getExchangeInfo(); // warm the filter cache
 
-  const symbols = dbSymbols(config.strategy.timeframe);
+  const symbols = scopeSymbols(dbSymbols(config.strategy.timeframe));
   if (symbols.length === 0) {
     throw new Error("No candles in DB. Run `npm run collect` first.");
   }
+  logger.info(`universe: ${symbols.length} symbols${process.env.BACKTEST_SYMBOLS ? " (scoped by BACKTEST_SYMBOLS)" : " (ALL research-DB symbols — set BACKTEST_SYMBOLS=env to match live)"}`);
 
   const params = paramsFromEnv(); // shared with the live engine → backtest-faithful
 

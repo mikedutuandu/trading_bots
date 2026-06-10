@@ -1,4 +1,4 @@
-import { config } from "../config.js";
+import { config, envBool } from "../config.js";
 import { logger } from "../logger.js";
 import { sleep } from "../util.js";
 import { getDb, closeDb } from "../storage/db.js";
@@ -40,7 +40,7 @@ async function mainnetPreflight(deps: EngineDeps, equity: number): Promise<void>
   logger.warn(`  universe: ${deps.universe.length} symbols`);
   logger.warn(`  kill:     halt entries past ${(deps.maxDailyLossPct * 100).toFixed(1)}% daily loss`);
   logger.warn(`${bar}`);
-  if (process.env.SKIP_COUNTDOWN !== "true") {
+  if (!envBool("SKIP_COUNTDOWN", false)) {
     for (let i = 5; i > 0; i--) {
       logger.warn(`  starting in ${i}s …  (Ctrl-C to abort)`);
       await sleep(1000);
@@ -84,7 +84,9 @@ export async function runEngine(opts: RunOptions): Promise<void> {
   const filters = await getExchangeInfo();
   const deps = await buildEngineDeps({ modelFunding: false }); // the exchange charges funding
 
-  const dryRun = process.env.DRY_RUN === "true";
+  // Strict parse: a typo like DRY_RUN=True must throw, not silently fall through to a
+  // real LiveBroker sending real orders (the dangerous direction).
+  const dryRun = envBool("DRY_RUN", false);
   let broker: Broker;
   let stream: UserDataStream | null = null;
 
@@ -110,7 +112,7 @@ export async function runEngine(opts: RunOptions): Promise<void> {
     broker = new LiveBroker(filters);
     await reconcileLive(broker, deps);
 
-    if (process.env.NO_STREAM !== "true") {
+    if (!envBool("NO_STREAM", false)) {
       stream = new UserDataStream({
         wsUrl,
         onFill: (s, p, q) => logger.info(`stream fill ${s} qty=${q} @ ${p}`),
@@ -135,10 +137,10 @@ export async function runEngine(opts: RunOptions): Promise<void> {
   logger.info(`startup equity snapshot: ${startEquity.toFixed(2)} USDT`);
 
   try {
-    if (process.env.ONESHOT === "true") {
+    if (envBool("ONESHOT", false)) {
       await runTick(broker, deps);
     } else {
-      await runScheduled(broker, deps, { runImmediately: process.env.RUN_NOW === "true" });
+      await runScheduled(broker, deps, { runImmediately: envBool("RUN_NOW", false) });
     }
   } finally {
     await stream?.stop();
