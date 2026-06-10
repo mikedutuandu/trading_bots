@@ -1,16 +1,32 @@
 import { config } from "../config.js";
-import { dayKey } from "../util.js";
+import { dayKey, intervalMs } from "../util.js";
 import { getClosedTrades } from "../storage/trades.js";
 import { loadPositions } from "../storage/positions.js";
-import { getEquityCurve, getMeta, getMetaNum } from "../storage/engineState.js";
+import { dayStartEquity, getEquityCurve, getMeta, getMetaNum } from "../storage/engineState.js";
 import { metricsFromTrades, groupBy } from "../backtest/metrics.js";
 import { getMarkPrices } from "../exchange/marketData.js";
-import { intervalMs } from "../util.js";
+import { paramsFromEnv } from "../playbooks/paramsFromEnv.js";
 import { parseMonitorStatus } from "../engine/loop.js";
 
-/** The bot's configured behaviour — so the dashboard shows WHAT it's set to do. */
+/** The bot's configured behaviour — so the dashboard shows WHAT it's set to do.
+ *  Prefers the params the ENGINE stamped at startup (engine:params): the engine is a
+ *  separate process whose env can differ from ours. Falls back to our own env (same
+ *  .env file) for data written before the stamp existed. */
 function context() {
   const r = config.risk;
+  let stamped: Record<string, unknown> = {};
+  try {
+    stamped = JSON.parse(getMeta("engine:params") ?? "{}") as Record<string, unknown>;
+  } catch {
+    /* corrupt/absent stamp → fall back to env */
+  }
+  // Fallback covers data written before the stamp existed — but until the engine's NEXT
+  // start writes the stamp, these are OUR env values, which an inline-override engine run
+  // would not match. Surface that uncertainty instead of presenting env as truth.
+  const hasStamp = typeof stamped.adxMin === "number";
+  const fb = paramsFromEnv();
+  const n = (k: string, fallback: number): number => (typeof stamped[k] === "number" ? (stamped[k] as number) : fallback);
+  const maxNotional = n("maxNotional", r.maxNotionalPerTrade);
   return {
     risk: r.riskUsdt > 0 ? `${r.riskUsdt} USDT` : `${(r.riskPct * 100).toFixed(2)}%`,
     leverage: r.leverage,
@@ -21,7 +37,14 @@ function context() {
       config.universe.mode === "static"
         ? `${config.universe.symbols.length} static`
         : `top ${config.universe.size} dynamic`,
-    playbooks: process.env.PLAYBOOKS ?? "trend-pullback",
+    playbooks: (stamped.playbooks as string) ?? process.env.PLAYBOOKS ?? "trend-pullback",
+    strategy:
+      `ADX≥${n("adxMin", fb.adxMin)} · ATR×${n("atrMult", fb.atrStopMult)} · ` +
+      `TP ${n("take1", fb.takeFrac1)}/${n("take2", fb.takeFrac2)} · hold ${n("maxHold", fb.maxHoldBars)}/${n("stall", fb.stallBars)} · ` +
+      `trail ${n("trailMult", fb.trailMult)}× · cd ${n("cooldown", fb.cooldownBars)}` +
+      (hasStamp ? "" : " (env — engine hasn't stamped yet)"),
+    maxNotional: maxNotional > 0 ? maxNotional : null,
+    guardian: `${(stamped.reversalMode as string) ?? config.monitor.reversalMode}@${(stamped.reversalTf as string) ?? config.monitor.reversalTf}`,
   };
 }
 
@@ -42,11 +65,12 @@ export async function buildState(windowMs?: number) {
   // Live mark prices in ONE best-effort call → real-time unrealized PnL. If the venue
   // is unreachable this tick we just skip marks (uPnL shows "—"); the next poll retries.
   let marks = new Map<string, number>();
+  let marksOk = true;
   if (open.length > 0) {
     try {
       marks = await getMarkPrices();
     } catch {
-      /* venue unreachable this tick → uPnL shows — */
+      marksOk = false; // venue unreachable this tick → uPnL shows —
     }
   }
 
@@ -77,18 +101,33 @@ export async function buildState(windowMs?: number) {
   const barMs = intervalMs(config.strategy.timeframe);
   const ageMs = lastTick ? Date.now() - lastTick : null;
   const nextInMs = nextTick ? nextTick - Date.now() : null;
+  // The guardian heartbeat fires every MONITOR_INTERVAL_MIN while the process is alive —
+  // it goes quiet within minutes of a dead engine, whereas nextTick (hourly) can show
+  // "online" for up to ~65 min after a crash. Treat a silent guardian as STALE.
+  const guardianQuiet =
+    config.monitor.enabled &&
+    lastMonitor !== null &&
+    Date.now() - lastMonitor > Math.max(3 * config.monitor.intervalMin * 60_000, 180_000);
   // Stale = well past the scheduled next tick (process likely died). Fall back to
   // tick-age when nextTick is absent (data from before this field existed).
   const status =
     lastTick === null && nextTick === null
       ? "idle"
-      : nextTick !== null
-        ? Date.now() > nextTick + 5 * 60_000
-          ? "stale"
-          : "online"
-        : ageMs! > 2 * barMs + 5 * 60_000
-          ? "stale"
-          : "online";
+      : guardianQuiet
+        ? "stale"
+        : nextTick !== null
+          ? Date.now() > nextTick + 5 * 60_000
+            ? "stale"
+            : "online"
+          : ageMs! > 2 * barMs + 5 * 60_000
+            ? "stale"
+            : "online";
+
+  // Kill-switch proximity: the engine halts NEW entries past −MAX_DAILY_LOSS_PCT from the
+  // day's opening equity. Surfaces "how close are we to the breaker" (snapshot-based —
+  // live float not included, same basis the engine itself uses at tick time).
+  const dayOpen = dayStartEquity(Date.now(), latestEquity);
+  const dayDdPct = dayOpen > 0 ? Math.max(0, (dayOpen - latestEquity) / dayOpen) : 0;
 
   const openPositions = open.map((p) => {
     const mark = marks.get(p.symbol) ?? null;
@@ -106,17 +145,22 @@ export async function buildState(windowMs?: number) {
       tp2: p.pos.tp2,
       qtyRemaining: p.pos.qtyRemaining,
       qtyTotal: p.pos.qtyTotal,
+      qtyTp1: p.pos.qtyTp1, // 0 under TAKE1=0 → "TP1 hit" only means breakeven armed
       tp1Hit: p.pos.tp1Hit,
       tp2Hit: p.pos.tp2Hit,
       riskUsdt: p.riskUsdt,
-      unrealizedPnl, // live
+      // Gap-through-stop loss scales with NOTIONAL — the number the $500 cap bounds.
+      notional: (mark ?? p.pos.entry) * p.pos.qtyRemaining,
+      unrealizedPnl, // live float on the remaining leg
       realizedSoFar: p.grossPnl - p.commission + p.funding, // booked (fees + partial TPs)
       monitor: monitorStatus[p.symbol] ?? null, // guardian's faster-TF status {up, against} or null
       openedAt: p.openedAt,
     };
   });
   // Sum of live floating PnL across open positions (separate from realized metrics).
-  const unrealizedPnl = openPositions.reduce((s, o) => s + (o.unrealizedPnl ?? 0), 0);
+  // null when the mark fetch failed — "unknown" must not render as a green +0.00.
+  const unrealizedPnl = marksOk ? openPositions.reduce((s, o) => s + (o.unrealizedPnl ?? 0), 0) : null;
+  const grossExposure = openPositions.reduce((s, o) => s + o.notional, 0);
 
   return {
     now: Date.now(),
@@ -124,11 +168,19 @@ export async function buildState(windowMs?: number) {
     venue: getMeta("engine:label") ?? "—", // TESTNET | LIVE — which run wrote this data
     context: context(),
     today: { trades: todays.length, netPnl: todayPnl },
-    unrealizedPnl, // live floating PnL of open positions
+    unrealizedPnl, // live floating PnL of open positions (null = marks unavailable)
+    grossExposure, // Σ |notional| of open positions — what a gap actually hits
+    kill: { dayOpen, ddPct: dayDdPct, limitPct: config.risk.maxDailyLossPct },
     health: { lastTick, ageMs, nextTick, nextInMs, status, lastMonitor },
     metrics,
     open: openPositions,
     byPlaybook,
+    byReason: [...groupBy(closed, (t) => t.closeReason ?? "?")].map(([k, g]) => ({
+      reason: k,
+      trades: g.trades,
+      winRate: g.trades ? g.wins / g.trades : 0,
+      netPnl: g.netPnl,
+    })),
     equityCurve: curve.map((c) => ({ ts: c.ts, equity: c.equity })),
     recentClosed: closed
       .slice(-50)

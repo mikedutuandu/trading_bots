@@ -84,6 +84,27 @@ export async function runEngine(opts: RunOptions): Promise<void> {
   const filters = await getExchangeInfo();
   const deps = await buildEngineDeps({ modelFunding: false }); // the exchange charges funding
 
+  // Stamp the engine's EFFECTIVE strategy knobs for the dashboard. The dashboard is a
+  // separate process whose env can differ (inline overrides on this run) — it must show
+  // what THIS engine actually trades with, not recompute from its own env.
+  setMeta(
+    "engine:params",
+    JSON.stringify({
+      adxMin: deps.params.adxMin,
+      atrMult: deps.params.atrStopMult,
+      take1: deps.params.takeFrac1,
+      take2: deps.params.takeFrac2,
+      trailMult: deps.params.trailMult,
+      cooldown: deps.params.cooldownBars,
+      maxHold: deps.params.maxHoldBars,
+      stall: deps.params.stallBars,
+      maxNotional: config.risk.maxNotionalPerTrade,
+      reversalMode: config.monitor.reversalMode,
+      reversalTf: config.monitor.reversalTf,
+      playbooks: deps.playbooks.map((p) => p.name).join("+"),
+    }),
+  );
+
   // Strict parse: a typo like DRY_RUN=True must throw, not silently fall through to a
   // real LiveBroker sending real orders (the dangerous direction).
   const dryRun = envBool("DRY_RUN", false);

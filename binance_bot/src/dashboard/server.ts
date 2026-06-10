@@ -13,14 +13,26 @@ import { buildState } from "./state.js";
  */
 export function startDashboard(port: number): void {
   getDb(); // ensure schema exists
-  // Point the public client at the venue that wrote this DB, so live mark prices
-  // come from the right market (demo-fapi for testnet, mainnet for live).
-  useVenue(getMeta("engine:label") === "LIVE");
+
+  // Point the public client at the venue that wrote this DB, so live mark prices come
+  // from the right market (demo-fapi for testnet, mainnet for live). Re-evaluated per
+  // request: if the dashboard starts BEFORE the engine's first run, engine:label is not
+  // set yet — a one-shot choice would price LIVE positions off demo marks forever.
+  let venueLabel: string | null | undefined;
+  const ensureVenue = (): void => {
+    const label = getMeta("engine:label");
+    if (label !== venueLabel) {
+      venueLabel = label;
+      useVenue(label === "LIVE");
+    }
+  };
+  ensureVenue();
 
   const server = createServer(async (req, res) => {
     try {
       const u = new URL(req.url ?? "/", "http://localhost");
       if (u.pathname === "/api/state") {
+        ensureVenue();
         const w = Number(u.searchParams.get("window"));
         const body = JSON.stringify(await buildState(Number.isFinite(w) && w > 0 ? w : undefined));
         res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
@@ -101,8 +113,11 @@ const PAGE = `<!doctype html>
   <div class="kpis" id="kpis"></div>
   <section><h2>Equity</h2><div class="card"><svg id="chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg><div class="hint" id="chartrange" style="margin:6px 0 0"></div></div></section>
   <section><h2>Open positions</h2>
-    <div class="hint">Max loss = PnL if the current Stop hits (≈0 once it moves to breakeven) · Target = +2R goal (takes at TP1/TP2, trails the rest) · R now = current profit in risk-multiples · Monitor = intra-minute guardian · ✓ 15m trend with you (↑/↓ = 15m direction) · ⚠ 15m against you (auto-closes in exit mode) · trail = TP2 runner managed by the trailing stop · — = 15m not assessed yet</div>
+    <div class="hint">Max loss = booked PnL + remaining leg at the current Stop (≈0 once at breakeven) · R now = (booked + live float) ÷ planned risk — comparable to the closed table's R · Notional = remaining exposure (what a gap actually hits; the engine caps it per trade) · TP: BE = TP1 touched → stop to breakeven (nothing taken when TAKE1=0) · TP1✓/TP2 = partial banked · Monitor = intra-minute guardian · ✓/⚠ = 15m trend with/against you (auto-closes in exit mode) · trail = TP2 runner on the trailing stop · — = 15m not assessed yet</div>
     <div class="card"><table id="open"></table></div></section>
+  <section><h2>By close reason</h2>
+    <div class="hint">The live↔backtest parity lens — compare with <code>LIVE_SIM=true BACKTEST_SYMBOLS=env</code> replays. REVERSAL_CLOSE / GUARDIAN_STOP are guardian-only exits.</div>
+    <div class="card"><table id="reasons"></table></div></section>
   <section><h2>By playbook</h2><div class="card"><table id="pb"></table></div></section>
   <section><h2>Recent closed</h2><div class="card"><table id="closed"></table></div></section>
 </main>
@@ -137,12 +152,14 @@ function table(el, head, rows) {
     (rows.length ? rows.join('') : '<tr><td colspan="'+head.length+'" class="muted">none</td></tr>');
 }
 
-// Render the bot-config strip (risk, leverage, universe, playbooks…).
+// Render the bot-config strip (risk, leverage, universe, strategy knobs…).
 function ctxStrip(c) {
   return [
     ['risk', c.risk], ['leverage', c.leverage+'x'], ['max open', c.maxOpen],
+    ['cap/trade', c.maxNotional ? '$'+c.maxNotional : 'off'],
     ['kill switch', (c.killSwitchPct*100).toFixed(0)+'%'], ['timeframe', c.timeframe],
     ['universe', c.universe], ['playbooks', c.playbooks],
+    ['strategy', c.strategy], ['guardian', c.guardian],
   ].map(([k,v]) => '<span>'+k+' <b>'+v+'</b></span>').join('');
 }
 
@@ -171,33 +188,41 @@ async function tick() {
 
   // No closed trades yet → trade-ratio metrics are undefined; show "—" not 0.0%/∞/0R.
   const noTrades = m.trades === 0;
+  // Kill-switch proximity: how far today's (snapshot) equity sits from the −limit halt.
+  const killLeft = s.kill.limitPct - s.kill.ddPct;
+  const killVal = '-' + pct(s.kill.ddPct) + ' / -' + pct(s.kill.limitPct);
+  const killCls = s.kill.ddPct <= 0.001 ? 'muted' : killLeft < 0.02 ? 'warn' : 'neg';
   document.getElementById('kpis').innerHTML = [
-    kpi('Equity', m.endEquity.toFixed(2)),
-    kpi('Unrealized (live)', usd(s.unrealizedPnl), sign(s.unrealizedPnl)),
+    kpi('Equity (last tick)', m.endEquity.toFixed(2)),
+    kpi('Unrealized (live)', s.unrealizedPnl==null?'—':usd(s.unrealizedPnl), s.unrealizedPnl==null?'muted':sign(s.unrealizedPnl)),
+    kpi('Gross exposure', s.grossExposure.toFixed(0) + (m.endEquity>0 ? ' ('+(s.grossExposure/m.endEquity).toFixed(1)+'×)' : ''), s.grossExposure > 2*m.endEquity ? 'warn' : ''),
+    kpi('Day vs kill switch', killVal, killCls),
     kpi('Net PnL (closed)', noTrades?'—':usd(m.netPnl), noTrades?'muted':sign(m.netPnl)),
     kpi('Today', usd(s.today.netPnl)+'  ('+s.today.trades+')', sign(s.today.netPnl)),
     kpi('Return', pct(m.returnPct), sign(m.returnPct)),
     kpi('Win rate', noTrades?'—':pct(m.winRate), noTrades?'muted':''),
     kpi('Expectancy', noTrades?'—':(m.expectancyR.toFixed(3)+'R'), noTrades?'muted':sign(m.expectancyR)),
     kpi('Profit factor', noTrades?'—':(m.profitFactor==null||!isFinite(m.profitFactor)?'∞':m.profitFactor.toFixed(2)), noTrades?'muted':sign(m.profitFactor-1)),
-    kpi('Max DD', pct(m.maxDrawdownPct), 'neg'),
+    kpi('Max DD (window)', pct(m.maxDrawdownPct), 'neg'),
     kpi('Trades', m.trades + ' ('+m.wins+'W/'+m.losses+'L)'),
     kpi('Fees', usd(-m.commission), 'neg'),
-    kpi('Funding', usd(m.funding), sign(m.funding)),
   ].join('');
 
   chart(s.equityCurve);
   document.getElementById('chartrange').textContent =
     s.equityCurve.length ? (tdate(s.equityCurve[0].ts) + '  →  ' + tdate(s.equityCurve[s.equityCurve.length-1].ts)) : '';
 
-  table('open', ['Symbol','Side','Entry','Mark','Stop','Max loss','Target (+2R)','uPnL (live)','R now','TP','Monitor','Age'],
+  table('open', ['Symbol','Side','Entry','Mark','Notional','Stop','Max loss','Target (+2R)','uPnL (live)','R now','TP','Monitor','Age'],
     s.open.map(p => {
       const risk = p.riskUsdt;
-      const rNow = (risk && p.unrealizedPnl!=null) ? p.unrealizedPnl/risk : null;
-      // PnL if the CURRENT stop hits: negative = loss, ~0 = breakeven, positive = locked profit.
+      // Both include the BOOKED part (partial TPs, fees) so they reflect the TRADE's
+      // outcome — matching the closed table's R — not just the remaining leg's float.
+      const rNow = (risk && p.unrealizedPnl!=null) ? (p.realizedSoFar + p.unrealizedPnl)/risk : null;
       const sgn = p.side==='long' ? 1 : -1;
-      const atStop = sgn*(p.stop - p.entry)*p.qtyRemaining;
+      const atStop = p.realizedSoFar + sgn*(p.stop - p.entry)*p.qtyRemaining;
       const atStopCls = atStop < -0.01 ? 'neg' : atStop > 0.01 ? 'pos' : 'muted';
+      // TP cell: with TAKE1=0 a TP1 touch banks nothing — it only arms breakeven ("BE").
+      const tpCell = p.tp2Hit ? 'TP2' : p.tp1Hit ? (p.qtyTp1 > 0 ? 'TP1✓' : 'BE') : '—';
       // Guardian Monitor: a TP2 runner is left to the trail; else show the faster-TF (15m)
       // alignment — ✓ with you / ⚠ against you — plus the 15m trend direction.
       const mon = p.monitor;
@@ -210,15 +235,20 @@ async function tick() {
       return '<tr><td>'+p.symbol+'</td><td class="'+p.side+'">'+p.side+'</td>'
         +'<td>'+p.entry+'</td>'
         +'<td>'+(p.markPrice!=null?p.markPrice:'—')+'</td>'
+        +'<td>'+p.notional.toFixed(0)+'</td>'
         +'<td>'+p.stop+'</td>'
         +'<td class="'+atStopCls+'">'+usd(atStop)+'</td>'
         +'<td class="pos">'+(risk!=null?'+'+(2*risk).toFixed(2):'—')+'</td>'
         +'<td class="'+(p.unrealizedPnl==null?'muted':sign(p.unrealizedPnl))+'">'+(p.unrealizedPnl==null?'—':usd(p.unrealizedPnl))+'</td>'
         +'<td class="'+(rNow==null?'muted':sign(rNow))+'">'+(rNow==null?'—':(rNow>=0?'+':'')+rNow.toFixed(2)+'R')+'</td>'
-        +'<td>'+(p.tp2Hit?'TP2':p.tp1Hit?'TP1✓':'—')+'</td>'
+        +'<td>'+tpCell+'</td>'
         + monCell
         +'<td class="muted">'+ago(s.now-p.openedAt)+'</td></tr>';
     }));
+
+  table('reasons', ['Reason','Trades','Win rate','Net PnL'],
+    s.byReason.map(r => '<tr><td>'+r.reason+'</td><td>'+r.trades+'</td><td>'+pct(r.winRate)+'</td>'
+      +'<td class="'+sign(r.netPnl)+'">'+usd(r.netPnl)+'</td></tr>'));
 
   table('pb', ['Playbook','Trades','Win rate','Net PnL'],
     s.byPlaybook.map(p => '<tr><td>'+p.playbook+'</td><td>'+p.trades+'</td><td>'+pct(p.winRate)+'</td>'
