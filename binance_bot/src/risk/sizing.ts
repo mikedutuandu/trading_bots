@@ -1,4 +1,5 @@
 import type { Signal, SymbolFilter } from "../types.js";
+import { config } from "../config.js";
 
 /** Round quantity DOWN to the exchange step size (never over-risk). */
 export function roundToStep(qty: number, step: number): number {
@@ -113,5 +114,15 @@ export function sizePosition(
     tp1: roundToTick(signal.tp1, filter.tickSize),
     tp2: roundToTick(signal.tp2, filter.tickSize),
     tp3: roundToTick(signal.tp3, filter.tickSize),
+  };
+}
+
+/** The live M8 sizing caps from config — ONE builder shared by the engine and every
+ *  replay script, so backtest/optimize/sweep size exactly like `npm run live` (parity). */
+export function liveSizingOpts(): SizingOpts {
+  return {
+    riskUsdt: config.risk.riskUsdt,
+    maxRiskUsdt: config.risk.maxTradeRiskUsdt,
+    maxNotional: config.risk.maxNotionalPerTrade,
   };
 }

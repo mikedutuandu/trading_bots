@@ -8,7 +8,7 @@ import type { Candle, CloseReason, Trade } from "../types.js";
 import { computeIndicators } from "../playbooks/index.js";
 import { ema } from "../indicators/ta.js";
 import type { IndicatorCtx, Playbook, StrategyParams } from "../playbooks/types.js";
-import { sizePosition, splitTranches } from "../risk/sizing.js";
+import { sizePosition, splitTranches, type SizingOpts } from "../risk/sizing.js";
 import { closeReasonOf, manageOnCandle, type RuntimePosition } from "../risk/manage.js";
 import { EMA_WARMUP_BARS, againstPosition, fasterTfUp } from "../risk/guardian.js";
 
@@ -23,6 +23,8 @@ export interface BacktestConfig {
   slippageBps: number;
   maxOpenPositions: number;
   maxDailyLossPct: number;
+  /** Live M8 sizing caps (riskUsdt / maxTradeRisk / maxNotional) — pass for live parity. */
+  sizing?: SizingOpts;
   from?: number;
   to?: number;
   /** Simulate the LIVE execution overlay on top of the candle-close engine:
@@ -369,7 +371,7 @@ export async function runBacktest(cfg: BacktestConfig): Promise<BacktestResult> 
       for (const pb of cfg.playbooks) {
         const signal = pb.detect(sd.candles, i, sd.ind, cfg.params);
         if (!signal) continue;
-        const sized = sizePosition(signal, equity, cfg.riskPct, cfg.leverage, filter);
+        const sized = sizePosition(signal, equity, cfg.riskPct, cfg.leverage, filter, cfg.sizing);
         if (!sized) continue;
 
         const long = signal.side === "long";

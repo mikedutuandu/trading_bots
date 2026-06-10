@@ -7,6 +7,7 @@ import { binance } from "../exchange/binance.js";
 import { getExchangeInfo, scopeSymbols } from "../exchange/marketData.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
 import { DEFAULT_PARAMS, type StrategyParams } from "../playbooks/types.js";
+import { liveSizingOpts } from "../risk/sizing.js";
 import { runBacktest, type BacktestConfig } from "../backtest/runner.js";
 import { computeMetrics } from "../backtest/metrics.js";
 
@@ -18,6 +19,8 @@ import { computeMetrics } from "../backtest/metrics.js";
  *   TRAIN_END=2025-12-01 npm run optimize
  *   BACKTEST_SYMBOLS=env TRAIN_END=… npm run optimize   # tune on the live universe
  *
+ * NB: the live M8 caps are ABSOLUTE USDT values, so with the small startEquity their bite
+ * depends on the equity path — set MAX_NOTIONAL_PER_TRADE=0 etc. when you want UNCAPPED tuning.
  * Deliberately runs the PURE engine (no LIVE_SIM guardian overlay) — the grid tunes the
  * playbook, not the safety layer. After picking a config, ALWAYS validate it with
  * `LIVE_SIM=true BACKTEST_SYMBOLS=env npm run backtest` to see what live would do to it.
@@ -86,6 +89,7 @@ async function main(): Promise<void> {
     slippageBps: config.risk.slippageBps,
     maxOpenPositions: config.risk.maxOpenPositions,
     maxDailyLossPct: config.risk.maxDailyLossPct,
+    sizing: liveSizingOpts(), // mirror the live M8 caps — replay sizes exactly like the engine
   };
 
   const combos = buildCombos();

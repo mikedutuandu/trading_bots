@@ -6,6 +6,7 @@ import { formatPosition, getOpenPositions } from "../exchange/account.js";
 import { notifyEvent } from "../notifications/telegram.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
 import { paramsFromEnv } from "../playbooks/paramsFromEnv.js";
+import { liveSizingOpts } from "../risk/sizing.js";
 import { saveTrade } from "../storage/trades.js";
 import { deletePosition, loadPositions, savePosition } from "../storage/positions.js";
 import type { Broker } from "./broker.js";
@@ -27,11 +28,7 @@ export async function buildEngineDeps(opts: { modelFunding: boolean }): Promise<
     maxDailyLossPct: config.risk.maxDailyLossPct,
     timeframe: config.strategy.timeframe,
     modelFunding: opts.modelFunding,
-    sizing: {
-      riskUsdt: config.risk.riskUsdt,
-      maxRiskUsdt: config.risk.maxTradeRiskUsdt,
-      maxNotional: config.risk.maxNotionalPerTrade,
-    },
+    sizing: liveSizingOpts(),
   };
   const riskDesc =
     config.risk.riskUsdt > 0

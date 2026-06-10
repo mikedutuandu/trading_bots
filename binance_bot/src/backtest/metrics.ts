@@ -1,4 +1,5 @@
 import type { Trade } from "../types.js";
+import { dayKey } from "../util.js";
 import type { BacktestResult } from "./runner.js";
 
 export interface Metrics {
@@ -105,6 +106,21 @@ function avg(a: number[]): number {
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 const usd = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(2)}`;
 
+/** Per-UTC-day compounded returns from the equity curve (last equity of each day). */
+export function dailyReturns(curve: Array<{ ts: number; equity: number }>): number[] {
+  const lastOfDay = new Map<string, number>();
+  for (const p of curve) lastOfDay.set(dayKey(p.ts), p.equity);
+  const eqs = [...lastOfDay.values()];
+  const rets: number[] = [];
+  for (let i = 1; i < eqs.length; i++) {
+    if (eqs[i - 1]! > 0) rets.push(eqs[i]! / eqs[i - 1]! - 1);
+  }
+  return rets;
+}
+
+const quantile = (sorted: number[], q: number): number =>
+  sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]! : 0;
+
 export function formatReport(result: BacktestResult, label: string): string {
   const m = computeMetrics(result);
   const lines: string[] = [];
@@ -125,6 +141,18 @@ export function formatReport(result: BacktestResult, label: string): string {
   lines.push(`\nBy playbook:`);
   for (const [k, g] of byPb) {
     lines.push(`  ${k.padEnd(16)} ${String(g.trades).padStart(4)} trades  ${pct(g.wins / g.trades).padStart(6)} win  ${usd(g.netPnl).padStart(10)} USDT`);
+  }
+
+  // Daily PnL distribution — sets expectations for what a live day looks like.
+  const dr = dailyReturns(result.equityCurve).sort((a, b) => a - b);
+  if (dr.length >= 5) {
+    const greenDays = dr.filter((r) => r > 0).length;
+    const mean = dr.reduce((a, b) => a + b, 0) / dr.length;
+    lines.push(`\nDaily PnL (% of equity, ${dr.length} days, ${pct(greenDays / dr.length)} green):`);
+    lines.push(
+      `  mean ${pct(mean)}/day · median ${pct(quantile(dr, 0.5))} · typical p5..p95 ${pct(quantile(dr, 0.05))} .. ${pct(quantile(dr, 0.95))}`,
+    );
+    lines.push(`  worst day ${pct(dr[0]!)} · best day ${pct(dr[dr.length - 1]!)}`);
   }
 
   // Per close reason — the live↔backtest parity lens (e.g. REVERSAL_CLOSE only exists

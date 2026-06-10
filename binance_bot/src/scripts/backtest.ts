@@ -7,6 +7,7 @@ import { binance } from "../exchange/binance.js";
 import { getExchangeInfo, scopeSymbols } from "../exchange/marketData.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
 import { envNum, paramsFromEnv } from "../playbooks/paramsFromEnv.js";
+import { liveSizingOpts } from "../risk/sizing.js";
 import { runBacktest, type BacktestConfig } from "../backtest/runner.js";
 import { formatReport } from "../backtest/metrics.js";
 
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
     slippageBps: config.risk.slippageBps,
     maxOpenPositions: config.risk.maxOpenPositions,
     maxDailyLossPct: config.risk.maxDailyLossPct,
+    sizing: liveSizingOpts(), // mirror the live M8 caps — replay sizes exactly like the engine
   };
 
   logger.info(
