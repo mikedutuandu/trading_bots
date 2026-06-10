@@ -63,20 +63,20 @@ only ~45% green days — profits concentrate in a few good days. The edge is THI
 
 ### Entry — `trend-pullback`
 - **Trend:** EMA50 vs EMA200 on the 1h. Long only in an uptrend, short only in a downtrend.
-- **Gate:** `ADX(14) ≥ 25` (avoid sideways chop).
+- **Gate:** `ADX(14) ≥ 35` (avoid sideways chop — raised from 25 in the 2026-06-10 sweep).
 - **Trigger:** price pulls back to EMA20 and reclaims it with a reversal candle in the trend direction.
 - **Stop:** `entry ∓ 1.5×ATR(14)`. That entry-to-stop distance **is 1R** — the unit everything is measured in.
 
 ### Exit — the scaled ladder (where the edge lives)
 | Stage | Trigger | Action | Stop moves to |
 |---|---|---|---|
-| **TP1** | +1R | sell 0.3 | **breakeven** (capital safe) |
-| **TP2** | +2R | sell 0.3 | **+1R** (profit locked) + arm the trail |
-| **Runner** | — | last 0.4 **trails** | chandelier: `peak ∓ 3×ATR`, ratchets one way only |
+| **TP1** | +1R | sell 0 (skip — current config) | **breakeven** (capital safe) |
+| **TP2** | +2R | sell 0.5 | **+1R** (profit locked) + arm the trail |
+| **Runner** | — | last 0.5 **trails** | chandelier: `peak ∓ 3×ATR`, ratchets one way only |
 
-So a typical winner: `0.3×(+1R) + 0.3×(+2R) + 0.4×(runner)`. Once TP2 hits, the runner can only win
-between +1R and +∞. A trade that hits TP1 then fades back banks **+0.3R** (not 0). A trade stopped
-before TP1 loses **−1R**.
+So a typical winner (current `TAKE1=0 / TAKE2=0.5`): `0.5×(+2R) + 0.5×(runner)`. Once TP2 hits,
+the runner can only win between +1R and +∞. A trade stopped before TP1 loses **−1R**. (The TP
+fractions are `.env` knobs — the §2 table is the source of truth.)
 
 Other exits: **HEALTH_CLOSE** (1h trend flips against the position), **STOP** / **MANAGED_STOP** (the
 protective/trailing stop).
