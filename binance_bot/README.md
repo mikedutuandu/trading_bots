@@ -117,6 +117,7 @@ reasons so its impact can be measured.
 | `npm run account` / `flatten` | Print balances+positions / emergency close-all | testnet / live |
 | `npm run typecheck` | `tsc --noEmit` — the only static gate (no test runner) | — |
 | `npx tsx src/scripts/check-manage.ts` | Deterministic assertions for the exit engine (TP/stop/trail math) | — |
+| `npx tsx src/scripts/check-detect.ts` | Deterministic assertions for the ENTRY engine (trend/reclaim/ADX/slope gates, stop/TP geometry) | — |
 | `npx tsx src/scripts/check-ta.ts` | Sanity-check the indicators against hand calcs | — |
 
 Engine env flags (prefix a `testnet`/`live` run): `RUN_NOW=true`, `ONESHOT=true`, `DRY_RUN=true` (use a
