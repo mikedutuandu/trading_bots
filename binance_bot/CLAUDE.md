@@ -26,7 +26,7 @@ Systematic Binance USDT-M perpetual futures bot (long/short, R-based risk), reve
 
 Runtime: Node ≥20, ESM (`"type": "module"`), TypeScript via `tsx`. Imports use `.js` suffixes on `.ts` sources (ESM + Bundler resolution). Preserve this.
 
-**Engine env flags** (prefix any `testnet`/`live` run): `RUN_NOW=true` (tick immediately then hourly), `ONESHOT=true` (one tick, exit), `DRY_RUN=true` (simulate, no orders, paper equity — see warning below), `NO_STREAM=true` (skip the user-data WS), `SKIP_COUNTDOWN=true`. Strategy/risk overrides: `RISK_USDT`, `ADX_MIN`, `TRAIL_MULT`, `COOLDOWN`, `TAKE1`, `TAKE2`, `PLAYBOOKS`, `UNIVERSE_MODE`, etc. Guardian overrides: `MONITOR_ENABLED`, `MONITOR_INTERVAL_MIN`, `MONITOR_REVERSAL_MODE` (off|warn|exit), `MONITOR_REVERSAL_TF`.
+**Engine env flags** (prefix any `testnet`/`live` run): `RUN_NOW=true` (tick immediately then hourly), `ONESHOT=true` (one tick, exit), `DRY_RUN=true` (simulate, no orders, paper equity — see warning below), `NO_STREAM=true` (skip the user-data WS), `SKIP_COUNTDOWN=true`. Strategy/risk overrides: `RISK_USDT`, `ADX_MIN`, `TRAIL_MULT`, `COOLDOWN`, `TAKE1`, `TAKE2`, `PLAYBOOKS`, `UNIVERSE_MODE`, etc. Guardian overrides: `MONITOR_ENABLED`, `MONITOR_INTERVAL_MIN`, `MONITOR_REVERSAL_MODE` (off|warn|exit), `MONITOR_REVERSAL_TF`, `MONITOR_SUMMARY_MIN`, `HEARTBEAT_HOURS` (tick-done Telegram every N h, 0 = off).
 
 > ⚠️ **Never run `DRY_RUN` against `testnet.sqlite`/`live.sqlite`.** It writes simulated (`-paper`) trades into the venue DB and pollutes the dashboard. Use a throwaway `DB_PATH=/tmp/x.sqlite` for dry-run sanity checks.
 

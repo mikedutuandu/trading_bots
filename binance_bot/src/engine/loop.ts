@@ -267,7 +267,29 @@ export async function runTick(broker: Broker, deps: EngineDeps): Promise<number 
   logger.info(
     `tick ${new Date(tickTime).toISOString()} done — equity ${equity.toFixed(2)}, ${open.size} open`,
   );
+  maybeNotifyTickDone(tickTime, equity, open.size);
   return tickTime;
+}
+
+// Tick-done heartbeat (HEARTBEAT_HOURS, 0 = off): Telegram the same line the log prints
+// after a completed hourly tick — proof of life with real content (equity, open count,
+// today's realized P&L) even when ZERO positions are open and the 15-min summary is
+// silent by design. 1 = every tick; raise to 4/6 to thin it out.
+let lastHeartbeatBoundary = 0;
+
+function maybeNotifyTickDone(tickTime: number, equity: number, openCount: number): void {
+  const hbMs = Math.round(config.monitor.heartbeatHours * 60) * 60_000;
+  if (hbMs <= 0 || !telegramEnabled) return;
+  const boundary = Math.floor(Date.now() / hbMs) * hbMs;
+  if (boundary === lastHeartbeatBoundary) return;
+  lastHeartbeatBoundary = boundary;
+  const closedToday = getClosedSince(dayStartMs(Date.now()));
+  const todayPnl = closedToday.reduce((s, t) => s + (t.netPnl ?? 0), 0);
+  const venue = getMeta("engine:label") ?? "engine";
+  void notify(
+    `💓 <b>[${venue}]</b> tick ${new Date(tickTime).toISOString().slice(11, 16)} UTC ✅ — ` +
+      `equity <b>$${equity.toFixed(2)}</b> · ${openCount} open · today ${todayPnl >= 0 ? "+" : ""}$${todayPnl.toFixed(2)} (${closedToday.length} closed)`,
+  );
 }
 
 /** If the exchange shows this position FLAT, journal the offline close (almost always
