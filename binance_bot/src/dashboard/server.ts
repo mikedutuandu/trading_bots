@@ -116,7 +116,7 @@ const PAGE = `<!doctype html>
     <div class="hint">Max loss = booked PnL + remaining leg at the current Stop (≈0 once at breakeven) · R now = (booked + live float) ÷ planned risk — comparable to the closed table's R · Notional = remaining exposure (what a gap actually hits; the engine caps it per trade) · TP: BE = TP1 touched → stop to breakeven (nothing taken when TAKE1=0) · TP1✓/TP2 = partial banked · Monitor = intra-minute guardian · ✓/⚠ = 15m trend with/against you (auto-closes in exit mode) · trail = TP2 runner on the trailing stop · — = 15m not assessed yet · Age (held/limit bars): time-stops count CLOSED 1h bars at the hourly tick — a 12-bar limit closes at ~13h wall-clock</div>
     <div class="card"><table id="open"></table></div></section>
   <section><h2>P&amp;L by day</h2>
-    <div class="hint">Read it like a bank statement: <b>Made / Lost</b> = how much the account changed that day (everything included — closed trades, open positions moving, funding, fees) · <b>Balance</b> = account value at the day's end · the grey "closed" note = the part that came from trades closed that day; the rest is open positions drifting</div>
+    <div class="hint"><b>Closed P&amp;L</b> = lời/lỗ ĐÃ CHỐT trong ngày (chỉ các lệnh đã đóng — cộng đúng bằng bảng Recent closed) · <b>Balance</b> = số dư cuối ngày (gồm cả lệnh đang mở, nên có thể lệch với cộng dồn Closed P&amp;L) · ngày tính theo giờ địa phương (GMT+<span class="tzh">7</span>)</div>
     <div class="card"><table id="bydays"></table></div></section>
   <section><h2>By close reason</h2>
     <div class="hint">The live↔backtest parity lens — compare with <code>LIVE_SIM=true BACKTEST_SYMBOLS=env</code> replays. REVERSAL_CLOSE / GUARDIAN_STOP are guardian-only exits.</div>
@@ -130,7 +130,8 @@ const pct = (x) => ((x??0)*100).toFixed(1) + '%';
 const sign = (x) => x>=0 ? 'pos' : 'neg';
 const ago = (ms) => { if(ms==null) return '—'; const s=Math.round(ms/1000); if(s<90) return s+'s ago'; const m=Math.round(s/60); if(m<90) return m+'m ago'; return Math.round(m/60)+'h ago'; };
 const dur = (ms) => { const s=Math.round(ms/1000); if(s<90) return s+'s'; const m=Math.round(s/60); if(m<90) return m+'m'; const h=m/60; if(h<48) return (h<10?h.toFixed(1):Math.round(h))+'h'; return Math.round(h/24)+'d'; };
-const tdate = (ts) => ts ? new Date(ts).toISOString().slice(5,16).replace('T',' ') : '—';
+let TZH = 7, TZMS = TZH*3600000; // display timezone (from /api/state tzHours)
+const tdate = (ts) => ts ? new Date(ts+TZMS).toISOString().slice(5,16).replace('T',' ') : '—';
 
 function kpi(label, val, cls) { return '<div class="kpi"><div class="label">'+label+'</div><div class="val '+(cls||'')+'">'+val+'</div></div>'; }
 
@@ -180,6 +181,8 @@ function renderFilters() {
 async function tick() {
   let s; try { s = await (await fetch('/api/state' + (win ? '?window=' + win : ''))).json(); } catch(e){ return; }
   const m = s.metrics;
+  TZH = s.tzHours ?? 7; TZMS = TZH*3600000;
+  document.querySelectorAll('.tzh').forEach(el => el.textContent = TZH);
   document.getElementById('dot').className = 'dot ' + s.health.status;
   document.getElementById('venue').textContent = s.venue;
   const next = s.health.nextInMs;
@@ -249,12 +252,11 @@ async function tick() {
         +'<td class="muted">'+ago(s.now-p.openedAt)+(p.heldBars!=null?' ('+p.heldBars+(p.holdLimit?'/'+p.holdLimit:'')+' bars)':'')+'</td></tr>';
     }));
 
-  table('bydays', ['Day (UTC)','Made / Lost','%','Balance (end of day)','Closed trades'],
+  table('bydays', ['Day (GMT+'+s.tzHours+')','Closed P&L','Trades','Balance (end of day)'],
     s.byDay.map(d => '<tr><td>'+d.day+'</td>'
-      +'<td class="'+(d.equityDelta==null?'muted':sign(d.equityDelta))+'" style="font-weight:600">'+(d.equityDelta==null?'—':usd(d.equityDelta))+'</td>'
-      +'<td class="'+(d.equityPct==null?'muted':sign(d.equityPct))+'">'+(d.equityPct==null?'—':pct(d.equityPct))+'</td>'
-      +'<td>'+(d.endBalance==null?'—':d.endBalance.toFixed(2))+'</td>'
-      +'<td class="muted">'+(d.trades?d.trades+' lệnh ('+usd(d.realized)+')':'—')+'</td></tr>'));
+      +'<td class="'+(d.trades?sign(d.realized):'muted')+'" style="font-weight:600">'+(d.trades?usd(d.realized):'—')+'</td>'
+      +'<td class="muted">'+(d.trades||'—')+'</td>'
+      +'<td>'+(d.endBalance==null?'—':d.endBalance.toFixed(2))+'</td></tr>'));
 
   table('reasons', ['Reason','Trades','Win rate','Net PnL'],
     s.byReason.map(r => '<tr><td>'+r.reason+'</td><td>'+r.trades+'</td><td>'+pct(r.winRate)+'</td>'

@@ -122,6 +122,9 @@ export const config = {
     // Second key (besides ALLOW_LIVE) required to actually send mainnet orders.
     confirmLive: bool("CONFIRM_LIVE", false),
     dashboardPort: int("DASHBOARD_PORT", 8787),
+    // Display timezone for the dashboard dates/day-buckets (hours east of UTC).
+    // Engine internals (kill-switch day, time-stops) stay UTC regardless.
+    dashboardTzHours: num("DASHBOARD_TZ_HOURS", 7),
     backupDir: env("BACKUP_DIR", "./data/backups"),
   },
 

@@ -102,44 +102,38 @@ export async function buildState(windowMs?: number) {
     netPnl: g.netPnl,
   }));
 
-  // Today's pulse: trades closed today (UTC) — always the calendar day, independent of the window.
-  const today = dayKey(Date.now());
-  const todays = allClosed.filter((t) => t.closedAt && dayKey(t.closedAt) === today);
+  // Display days are the OPERATOR'S calendar (DASHBOARD_TZ_HOURS, default GMT+7) —
+  // engine internals (kill-switch day, time-stops) stay UTC regardless.
+  const tzMs = config.ops.dashboardTzHours * 3_600_000;
+  const localDay = (ts: number): string => dayKey(ts + tzMs);
+
+  // Today's pulse: trades closed today (operator's day), independent of the window.
+  const today = localDay(Date.now());
+  const todays = allClosed.filter((t) => t.closedAt && localDay(t.closedAt) === today);
   const todayPnl = todays.reduce((s, t) => s + (t.netPnl ?? 0), 0);
 
-  // P&L per UTC day (last 14, newest first) — two truths side by side:
-  //   realized = Σ netPnl of trades CLOSED that day (what the journal booked);
-  //   equityΔ  = last equity snapshot of the day vs the previous day's — the ACTUAL
-  //              account move incl. funding and floating-PnL drift at snapshot time.
+  // P&L per day (last 14, newest first) — REALIZED only (trades closed that day; matches
+  // the Recent-closed table summed by day), plus the end-of-day balance for context.
   const eqByDay = new Map<string, number>();
-  for (const c of allCurve) eqByDay.set(dayKey(c.ts), c.equity);
+  for (const c of allCurve) eqByDay.set(localDay(c.ts), c.equity);
   const tradesByDay = new Map<string, { trades: number; realized: number }>();
   for (const t of allClosed) {
     if (!t.closedAt) continue;
-    const d = dayKey(t.closedAt);
+    const d = localDay(t.closedAt);
     const g = tradesByDay.get(d) ?? { trades: 0, realized: 0 };
     g.trades++;
     g.realized += t.netPnl ?? 0;
     tradesByDay.set(d, g);
   }
-  const eqDays = [...eqByDay.keys()].sort();
-  const byDay = [...new Set([...eqDays, ...tradesByDay.keys()])]
+  const byDay = [...new Set([...eqByDay.keys(), ...tradesByDay.keys()])]
     .sort()
     .slice(-14)
-    .map((d) => {
-      const prevDay = eqDays[eqDays.indexOf(d) - 1];
-      const eqEnd = eqByDay.get(d);
-      const eqPrev = prevDay !== undefined ? eqByDay.get(prevDay) : undefined;
-      const t = tradesByDay.get(d);
-      return {
-        day: d,
-        trades: t?.trades ?? 0,
-        realized: t?.realized ?? 0,
-        endBalance: eqEnd ?? null, // account value at the day's last snapshot
-        equityDelta: eqEnd !== undefined && eqPrev !== undefined ? eqEnd - eqPrev : null,
-        equityPct: eqEnd !== undefined && eqPrev !== undefined && eqPrev > 0 ? eqEnd / eqPrev - 1 : null,
-      };
-    })
+    .map((d) => ({
+      day: d,
+      trades: tradesByDay.get(d)?.trades ?? 0,
+      realized: tradesByDay.get(d)?.realized ?? 0,
+      endBalance: eqByDay.get(d) ?? null, // account value at the day's last snapshot
+    }))
     .reverse();
 
   // Health: how fresh is the last tick, and when is the next one scheduled?
@@ -249,6 +243,7 @@ export async function buildState(windowMs?: number) {
       netPnl: g.netPnl,
     })),
     byDay,
+    tzHours: config.ops.dashboardTzHours,
     equityCurve: curve.map((c) => ({ ts: c.ts, equity: c.equity })),
     recentClosed: closed
       .slice(-50)

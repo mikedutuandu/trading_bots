@@ -297,14 +297,15 @@ cột R bảng closed · **TP**: `—` chưa chạm · `BE` đã chạm TP1 (sto
 · `TP2` đã chốt nửa · **Monitor** = guardian (✓ 15m thuận · ⚠ 15m ngược → tự đóng) ·
 **Age** = tuổi lệnh kèm `(số nến/limit)` của time-stop.
 
-**Bảng "P&L by day" — đọc như SAO KÊ NGÂN HÀNG** (bảng dễ nhất, xem mỗi ngày 1 lần là đủ):
-- **Made / Lost** = hôm đó tài khoản **tăng/giảm bao nhiêu tiền** — con số duy nhất cần quan
-  tâm, đã gộp TẤT CẢ (lệnh đóng, lệnh đang mở lên/xuống, phí, funding).
-- **Balance (end of day)** = cuối ngày trong tài khoản còn bao nhiêu.
-- Cột xám "closed trades" = phần đến từ các lệnh **đã đóng** hôm đó (chi tiết kỹ thuật, bỏ
-  qua cũng được). Nó **lệch** với Made/Lost khi có lệnh ôm qua đêm — bình thường.
+**Bảng "P&L by day"** (bảng dễ nhất, xem mỗi ngày 1 lần là đủ — **ngày theo giờ Việt Nam GMT+7**):
+- **Closed P&L** = lời/lỗ **ĐÃ CHỐT** trong ngày — chỉ tính các lệnh đã đóng xong, cộng
+  đúng bằng bảng Recent closed. Đây là "tiền chắc".
+- **Balance (end of day)** = cuối ngày trong tài khoản còn bao nhiêu. Lưu ý: Balance gồm cả
+  lời/lỗ NỔI của lệnh đang mở, nên có thể nhích lệch so với cộng dồn Closed P&L — bình thường.
 - 💡 Kỳ vọng đúng (từ backtest): trung bình +0.2–0.7%/ngày, **~nửa số ngày đỏ** — nhìn theo
   TUẦN, đừng buồn vì 1 ngày đỏ.
+- (Riêng kill-switch −5%/ngày của bot vẫn reset theo 0h UTC = **7h sáng VN** — đó là múi
+  giờ nội bộ của máy, không đổi.)
 
 **Bảng "By close reason":** đếm lệnh theo lý do đóng — dùng để so live với backtest LIVE_SIM
 (tỷ lệ REVERSAL_CLOSE phải tương đương).
