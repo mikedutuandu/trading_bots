@@ -11,6 +11,7 @@
     "backtest": "tsx src/scripts/backtest.ts",
     "optimize": "tsx src/scripts/optimize.ts",
     "sweep": "tsx src/scripts/sweep.ts",
+    "mfe": "tsx src/scripts/mfe.ts",
     "testnet": "DB_PATH=./data/testnet.sqlite tsx src/scripts/testnet.ts",
     "live": "DB_PATH=./data/live.sqlite tsx src/scripts/live.ts",
     "account": "DB_PATH=./data/testnet.sqlite tsx src/scripts/account.ts",
