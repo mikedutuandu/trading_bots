@@ -107,6 +107,40 @@ export async function buildState(windowMs?: number) {
   const todays = allClosed.filter((t) => t.closedAt && dayKey(t.closedAt) === today);
   const todayPnl = todays.reduce((s, t) => s + (t.netPnl ?? 0), 0);
 
+  // P&L per UTC day (last 14, newest first) — two truths side by side:
+  //   realized = Σ netPnl of trades CLOSED that day (what the journal booked);
+  //   equityΔ  = last equity snapshot of the day vs the previous day's — the ACTUAL
+  //              account move incl. funding and floating-PnL drift at snapshot time.
+  const eqByDay = new Map<string, number>();
+  for (const c of allCurve) eqByDay.set(dayKey(c.ts), c.equity);
+  const tradesByDay = new Map<string, { trades: number; realized: number }>();
+  for (const t of allClosed) {
+    if (!t.closedAt) continue;
+    const d = dayKey(t.closedAt);
+    const g = tradesByDay.get(d) ?? { trades: 0, realized: 0 };
+    g.trades++;
+    g.realized += t.netPnl ?? 0;
+    tradesByDay.set(d, g);
+  }
+  const eqDays = [...eqByDay.keys()].sort();
+  const byDay = [...new Set([...eqDays, ...tradesByDay.keys()])]
+    .sort()
+    .slice(-14)
+    .map((d) => {
+      const prevDay = eqDays[eqDays.indexOf(d) - 1];
+      const eqEnd = eqByDay.get(d);
+      const eqPrev = prevDay !== undefined ? eqByDay.get(prevDay) : undefined;
+      const t = tradesByDay.get(d);
+      return {
+        day: d,
+        trades: t?.trades ?? 0,
+        realized: t?.realized ?? 0,
+        equityDelta: eqEnd !== undefined && eqPrev !== undefined ? eqEnd - eqPrev : null,
+        equityPct: eqEnd !== undefined && eqPrev !== undefined && eqPrev > 0 ? eqEnd / eqPrev - 1 : null,
+      };
+    })
+    .reverse();
+
   // Health: how fresh is the last tick, and when is the next one scheduled?
   const lastTick = getMetaNum("engine:lastTickTime");
   const nextTick = getMetaNum("engine:nextTickTime");
@@ -213,6 +247,7 @@ export async function buildState(windowMs?: number) {
       winRate: g.trades ? g.wins / g.trades : 0,
       netPnl: g.netPnl,
     })),
+    byDay,
     equityCurve: curve.map((c) => ({ ts: c.ts, equity: c.equity })),
     recentClosed: closed
       .slice(-50)
