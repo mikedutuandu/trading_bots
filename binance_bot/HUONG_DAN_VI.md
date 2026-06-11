@@ -297,6 +297,15 @@ cột R bảng closed · **TP**: `—` chưa chạm · `BE` đã chạm TP1 (sto
 · `TP2` đã chốt nửa · **Monitor** = guardian (✓ 15m thuận · ⚠ 15m ngược → tự đóng) ·
 **Age** = tuổi lệnh kèm `(số nến/limit)` của time-stop.
 
+**Bảng "P&L by day" — đọc như SAO KÊ NGÂN HÀNG** (bảng dễ nhất, xem mỗi ngày 1 lần là đủ):
+- **Made / Lost** = hôm đó tài khoản **tăng/giảm bao nhiêu tiền** — con số duy nhất cần quan
+  tâm, đã gộp TẤT CẢ (lệnh đóng, lệnh đang mở lên/xuống, phí, funding).
+- **Balance (end of day)** = cuối ngày trong tài khoản còn bao nhiêu.
+- Cột xám "closed trades" = phần đến từ các lệnh **đã đóng** hôm đó (chi tiết kỹ thuật, bỏ
+  qua cũng được). Nó **lệch** với Made/Lost khi có lệnh ôm qua đêm — bình thường.
+- 💡 Kỳ vọng đúng (từ backtest): trung bình +0.2–0.7%/ngày, **~nửa số ngày đỏ** — nhìn theo
+  TUẦN, đừng buồn vì 1 ngày đỏ.
+
 **Bảng "By close reason":** đếm lệnh theo lý do đóng — dùng để so live với backtest LIVE_SIM
 (tỷ lệ REVERSAL_CLOSE phải tương đương).
 

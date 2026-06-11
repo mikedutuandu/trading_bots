@@ -116,7 +116,7 @@ const PAGE = `<!doctype html>
     <div class="hint">Max loss = booked PnL + remaining leg at the current Stop (≈0 once at breakeven) · R now = (booked + live float) ÷ planned risk — comparable to the closed table's R · Notional = remaining exposure (what a gap actually hits; the engine caps it per trade) · TP: BE = TP1 touched → stop to breakeven (nothing taken when TAKE1=0) · TP1✓/TP2 = partial banked · Monitor = intra-minute guardian · ✓/⚠ = 15m trend with/against you (auto-closes in exit mode) · trail = TP2 runner on the trailing stop · — = 15m not assessed yet · Age (held/limit bars): time-stops count CLOSED 1h bars at the hourly tick — a 12-bar limit closes at ~13h wall-clock</div>
     <div class="card"><table id="open"></table></div></section>
   <section><h2>P&amp;L by day</h2>
-    <div class="hint">Realized = trades closed that UTC day · Equity Δ = the ACTUAL account move (incl. funding + floating drift at the hourly snapshot) — the two differ when positions stay open across days</div>
+    <div class="hint">Read it like a bank statement: <b>Made / Lost</b> = how much the account changed that day (everything included — closed trades, open positions moving, funding, fees) · <b>Balance</b> = account value at the day's end · the grey "closed" note = the part that came from trades closed that day; the rest is open positions drifting</div>
     <div class="card"><table id="bydays"></table></div></section>
   <section><h2>By close reason</h2>
     <div class="hint">The live↔backtest parity lens — compare with <code>LIVE_SIM=true BACKTEST_SYMBOLS=env</code> replays. REVERSAL_CLOSE / GUARDIAN_STOP are guardian-only exits.</div>
@@ -249,11 +249,12 @@ async function tick() {
         +'<td class="muted">'+ago(s.now-p.openedAt)+(p.heldBars!=null?' ('+p.heldBars+(p.holdLimit?'/'+p.holdLimit:'')+' bars)':'')+'</td></tr>';
     }));
 
-  table('bydays', ['Day (UTC)','Trades','Realized','Equity Δ','Δ%'],
-    s.byDay.map(d => '<tr><td>'+d.day+'</td><td>'+d.trades+'</td>'
-      +'<td class="'+(d.trades?sign(d.realized):'muted')+'">'+(d.trades?usd(d.realized):'—')+'</td>'
-      +'<td class="'+(d.equityDelta==null?'muted':sign(d.equityDelta))+'">'+(d.equityDelta==null?'—':usd(d.equityDelta))+'</td>'
-      +'<td class="'+(d.equityPct==null?'muted':sign(d.equityPct))+'">'+(d.equityPct==null?'—':pct(d.equityPct))+'</td></tr>'));
+  table('bydays', ['Day (UTC)','Made / Lost','%','Balance (end of day)','Closed trades'],
+    s.byDay.map(d => '<tr><td>'+d.day+'</td>'
+      +'<td class="'+(d.equityDelta==null?'muted':sign(d.equityDelta))+'" style="font-weight:600">'+(d.equityDelta==null?'—':usd(d.equityDelta))+'</td>'
+      +'<td class="'+(d.equityPct==null?'muted':sign(d.equityPct))+'">'+(d.equityPct==null?'—':pct(d.equityPct))+'</td>'
+      +'<td>'+(d.endBalance==null?'—':d.endBalance.toFixed(2))+'</td>'
+      +'<td class="muted">'+(d.trades?d.trades+' lệnh ('+usd(d.realized)+')':'—')+'</td></tr>'));
 
   table('reasons', ['Reason','Trades','Win rate','Net PnL'],
     s.byReason.map(r => '<tr><td>'+r.reason+'</td><td>'+r.trades+'</td><td>'+pct(r.winRate)+'</td>'

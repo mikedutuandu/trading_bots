@@ -135,6 +135,7 @@ export async function buildState(windowMs?: number) {
         day: d,
         trades: t?.trades ?? 0,
         realized: t?.realized ?? 0,
+        endBalance: eqEnd ?? null, // account value at the day's last snapshot
         equityDelta: eqEnd !== undefined && eqPrev !== undefined ? eqEnd - eqPrev : null,
         equityPct: eqEnd !== undefined && eqPrev !== undefined && eqPrev > 0 ? eqEnd / eqPrev - 1 : null,
       };
