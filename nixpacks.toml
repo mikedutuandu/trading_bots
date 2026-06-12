@@ -1,6 +1,7 @@
 # Railway / Nixpacks build config for the Binance bot.
 #
-# REQUIRED in the Railway service settings: set Root Directory = binance_bot
+# Railway service settings: Root Directory = repo root (the bot moved to the root 2026-06-12 —
+# if the service was previously set to "binance_bot", CLEAR that setting or deploys will fail).
 # (so this file + package.json are found, and Node 20 gets provisioned).
 #
 # The app runs the TypeScript sources DIRECTLY via tsx — there is NO compile step,

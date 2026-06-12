@@ -4,7 +4,7 @@ A systematic **Binance USDT-M perpetual futures** bot (long/short, 1h timeframe)
 from a friend's profitable bot. R-based risk, scaled take-profits + a trailing runner, and an
 intra-minute safety guardian.
 
-> **Status (2026-06-10):** **LIVE on mainnet at tiny size** (~$1k, 1% risk, $500/leg notional cap),
+> **Status (2026-06-12):** **LIVE on mainnet at tiny size** (~$1k, 1% risk, notional cap 50% of equity/leg),
 > forward-testing the §2 sweep-winner config. The edge is **thin (walk-forward PF 1.02–1.13) and
 > only replay-validated — not yet proven live**. See [§7 The honest risk picture](#7-the-honest-risk-picture--read-before-going-live).
 
@@ -45,7 +45,7 @@ finals judged under `LIVE_SIM` — the only combo positive on train AND OOS on b
 | `COOLDOWN` | `6` | bars to wait per symbol after a close |
 | `MAX_OPEN_POSITIONS` | `4` | caps correlated exposure — a top risk lever (see §6) |
 | `RISK_PCT` / `RISK_USDT` | `1%` / `0` | risk per trade |
-| `MAX_NOTIONAL_PER_TRADE` | `500` | hard cap ≈0.5× equity/leg — gap-through-stop loss scales with NOTIONAL, not planned risk; the risk-based sizer can otherwise blow notional past 2× equity on tight stops |
+| `MAX_NOTIONAL_PCT` | `0.5` | notional/leg ≤ 50% of CURRENT equity — self-scales with the account (gap-through-stop loss scales with NOTIONAL, not planned risk; the risk-based sizer can otherwise blow notional past 2× equity on tight stops) |
 | `LEVERAGE` | `10` | risk is set by the stop, not leverage; keep margin usage low |
 | `MAX_DAILY_LOSS_PCT` | `0.05` | kill switch — **halts new entries** past −5% on the day |
 | `MONITOR_ENABLED` / `_INTERVAL_MIN` | `true` / `1` | the intra-minute guardian (§4) |
