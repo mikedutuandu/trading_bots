@@ -112,6 +112,7 @@ reasons so its impact can be measured.
 | `npm run backtest` | Replay candles through the engine; win%, expectancy, PF, maxDD, daily-PnL distribution, by-close-reason, net of fees. `TRAIN_END=YYYY-MM-DD` → walk-forward | `binance.sqlite` |
 | `npm run optimize` | Walk-forward grid search over playbook knobs (select on TRAIN, report TEST) | `binance.sqlite` |
 | `npm run sweep` | Walk-forward sweep over ATR_MULT × TP profile × time-stops × ADX (the levers optimize misses); honors `LIVE_SIM` | `binance.sqlite` |
+| `npm run scan` | "Why is the bot not trading?" — run the REAL detect() on the CURRENT market and show each symbol's first blocking gate (ADX/pullback/reclaim) | — |
 | `npm run mfe` | MFE/MAE path autopsy — hour-by-hour excursion after every entry, winners-vs-losers peaks, and the time-stop "would holding longer have rescued it?" counterfactual. `MFE_SOURCE=live` for the real journal | `binance.sqlite` |
 | `npm run testnet` | **Forward-test** — live engine on the demo venue: hourly tick + 1-min guardian | `testnet.sqlite` |
 | `npm run live` | Real money (mainnet). Refuses unless `ALLOW_LIVE=true` **and** `CONFIRM_LIVE=true` | `live.sqlite` |
