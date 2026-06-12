@@ -97,12 +97,29 @@ async function backtestTrades(): Promise<Row[]> {
     }));
 }
 
+// One candle query per SYMBOL (covering all its trades) instead of one per TRADE —
+// ~2k trades over ~45 symbols would otherwise mean ~2k DB round-trips.
+const symbolCandles = new Map<string, ReturnType<typeof getCandles>>();
+
+function loadSymbolCandles(trades: Row[]): void {
+  const bySymbol = new Map<string, Row[]>();
+  for (const t of trades) (bySymbol.get(t.symbol) ?? bySymbol.set(t.symbol, []).get(t.symbol)!).push(t);
+  for (const [symbol, ts] of bySymbol) {
+    symbolCandles.set(
+      symbol,
+      getCandles(symbol, config.strategy.timeframe, {
+        from: Math.min(...ts.map((t) => t.openedAt)) + barMs,
+        to: Math.max(...ts.map((t) => t.openedAt)) + HORIZON * barMs,
+      }),
+    );
+  }
+}
+
 /** Per-bar signed excursions after entry: fav (towards profit) and adv (against), in R. */
 function path(t: Row): Array<{ favR: number; advR: number; closeR: number }> {
-  const candles = getCandles(t.symbol, config.strategy.timeframe, {
-    from: t.openedAt + barMs, // bar 0 is the signal candle; the trade lives from bar 1
-    to: t.openedAt + HORIZON * barMs,
-  });
+  const from = t.openedAt + barMs; // bar 0 is the signal candle; the trade lives from bar 1
+  const to = t.openedAt + HORIZON * barMs;
+  const candles = (symbolCandles.get(t.symbol) ?? []).filter((c) => c.openTime >= from && c.openTime <= to);
   const sgn = t.side === "long" ? 1 : -1;
   return candles.map((c) => ({
     favR: (sgn * ((sgn > 0 ? c.high : c.low) - t.entry)) / t.rDist,
@@ -127,6 +144,7 @@ async function main(): Promise<void> {
   getDb(); // candles come from the research DB (default DB_PATH)
 
   const maxHold = paramsFromEnv().maxHoldBars;
+  loadSymbolCandles(trades);
   const paths = trades
     .map((t) => ({ t, p: path(t) }))
     .filter(({ p }) => p.length >= Math.min(8, HORIZON)); // skip trades without enough candle history

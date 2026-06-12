@@ -271,18 +271,28 @@ export async function runTick(broker: Broker, deps: EngineDeps): Promise<number 
   return tickTime;
 }
 
+/** One-shot-per-period gate: true exactly once per `periodMs` boundary (shared by the
+ *  tick-done heartbeat and the 15-min position summary — same dedup, one definition). */
+function boundaryGate(): (periodMs: number) => boolean {
+  let last = 0;
+  return (periodMs: number) => {
+    const boundary = Math.floor(Date.now() / periodMs) * periodMs;
+    if (boundary === last) return false;
+    last = boundary; // claim the period up-front so a slow send can't double-fire
+    return true;
+  };
+}
+
 // Tick-done heartbeat (HEARTBEAT_HOURS, 0 = off): Telegram the same line the log prints
 // after a completed hourly tick — proof of life with real content (equity, open count,
 // today's realized P&L) even when ZERO positions are open and the 15-min summary is
 // silent by design. 1 = every tick; raise to 4/6 to thin it out.
-let lastHeartbeatBoundary = 0;
+const heartbeatDue = boundaryGate();
 
 function maybeNotifyTickDone(tickTime: number, equity: number, openCount: number): void {
   const hbMs = Math.round(config.monitor.heartbeatHours * 60) * 60_000;
   if (hbMs <= 0 || !telegramEnabled) return;
-  const boundary = Math.floor(Date.now() / hbMs) * hbMs;
-  if (boundary === lastHeartbeatBoundary) return;
-  lastHeartbeatBoundary = boundary;
+  if (!heartbeatDue(hbMs)) return;
   const closedToday = getClosedSince(dayStartMs(Date.now()));
   const todayPnl = closedToday.reduce((s, t) => s + (t.netPnl ?? 0), 0);
   const venue = getMeta("engine:label") ?? "engine";
@@ -739,14 +749,12 @@ export async function monitorOpenPositions(broker: Broker, deps: EngineDeps): Pr
 
 // Periodic Telegram open-positions summary so the book can be watched without the dashboard.
 // Gated to one send per MONITOR_SUMMARY_MIN boundary; the loop calls it on every wake.
-let lastSummaryBoundary = 0;
+const summaryDue = boundaryGate();
 
 async function maybeSendPositionSummary(broker: Broker): Promise<void> {
   const summaryMs = Math.round(config.monitor.summaryMin) * 60_000;
   if (summaryMs <= 0 || !telegramEnabled) return;
-  const boundary = Math.floor(Date.now() / summaryMs) * summaryMs;
-  if (boundary === lastSummaryBoundary) return;
-  lastSummaryBoundary = boundary; // claim this period up-front so a slow send can't double-fire
+  if (!summaryDue(summaryMs)) return;
 
   const open = loadPositions();
   if (open.length === 0) return; // nothing to report; entry/exit alerts cover trade transitions

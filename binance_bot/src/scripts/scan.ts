@@ -57,14 +57,21 @@ async function main(): Promise<void> {
   const universe = await getUniverse();
   logger.info(`scan: ${universe.length} symbols, gates ADX≥${params.adxMin} on ${config.strategy.timeframe} (same detect() as the engine)`);
 
+  // Fetch in small parallel batches (sequential = ~45 × 300ms ≈ 14s; batched ≈ 2s,
+  // well inside Binance's public rate limits).
   const verdicts: Verdict[] = [];
-  for (const s of universe) {
-    try {
-      const v = await scanSymbol(s);
-      if (v) verdicts.push(v);
-    } catch (err) {
-      verdicts.push({ symbol: s, trend: "—", adx: NaN, gate: `fetch failed: ${String(err).slice(0, 40)}` });
-    }
+  const BATCH = 8;
+  for (let i = 0; i < universe.length; i += BATCH) {
+    const batch = await Promise.all(
+      universe.slice(i, i + BATCH).map(async (s) => {
+        try {
+          return await scanSymbol(s);
+        } catch (err) {
+          return { symbol: s, trend: "—", adx: NaN, gate: `fetch failed: ${String(err).slice(0, 40)}` };
+        }
+      }),
+    );
+    verdicts.push(...batch.filter((v): v is Verdict => v !== null));
   }
 
   verdicts.sort((a, b) => (b.adx || 0) - (a.adx || 0));
