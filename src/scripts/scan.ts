@@ -3,9 +3,10 @@ import { logger } from "../logger.js";
 import { binance } from "../exchange/binance.js";
 import { getKlines, getUniverse, getExchangeInfo } from "../exchange/marketData.js";
 import { computeIndicators } from "../playbooks/index.js";
+import { ema } from "../indicators/ta.js";
 import { trendPullback } from "../playbooks/trendPullback.js";
 import { paramsFromEnv } from "../playbooks/paramsFromEnv.js";
-import { EMA_WARMUP_BARS } from "../risk/guardian.js";
+import { EMA_WARMUP_BARS, againstPosition, fasterTfUp } from "../risk/guardian.js";
 
 /**
  * "Why is the bot not trading?" — run the REAL detect() against the CURRENT market,
@@ -39,7 +40,23 @@ async function scanSymbol(symbol: string): Promise<Verdict | null> {
 
   const up = e50 > e200;
   const trend = up ? "↑up" : "↓down";
-  if (sig) return { symbol, trend, adx, gate: `SIGNAL ${sig.side.toUpperCase()}` };
+  if (sig) {
+    // Mirror the engine's ENTRY_ALIGN gate — a bare "SIGNAL" that the next tick would
+    // then skip (15m already against) would mislead the operator.
+    if (config.monitor.entryAlign) {
+      const rtf = await getKlines(symbol, config.monitor.reversalTf, { limit: 320 });
+      const closes = rtf.filter((k) => k.closeTime <= now).map((k) => k.close);
+      const i15 = closes.length - 1;
+      if (closes.length >= EMA_WARMUP_BARS) {
+        const e50f = ema(closes, 50)[i15]!;
+        const e200f = ema(closes, 200)[i15]!;
+        if (Number.isFinite(e50f) && Number.isFinite(e200f) && againstPosition(fasterTfUp(e50f, e200f), sig.side === "long")) {
+          return { symbol, trend, adx, gate: `SIGNAL ${sig.side.toUpperCase()} — blocked by ENTRY_ALIGN (${config.monitor.reversalTf} against)` };
+        }
+      }
+    }
+    return { symbol, trend, adx, gate: `SIGNAL ${sig.side.toUpperCase()}` };
+  }
 
   // Why not? Re-walk the gates in detect()'s order to name the first blocker.
   let gate: string;

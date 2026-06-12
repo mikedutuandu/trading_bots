@@ -102,6 +102,7 @@ export async function runEngine(opts: RunOptions): Promise<void> {
       maxNotionalPct: config.risk.maxNotionalPct,
       reversalMode: config.monitor.reversalMode,
       reversalTf: config.monitor.reversalTf,
+      entryAlign: config.monitor.entryAlign,
       playbooks: deps.playbooks.map((p) => p.name).join("+"),
     }),
   );

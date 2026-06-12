@@ -35,6 +35,7 @@ function effectiveParams() {
     maxNotionalPct: n("maxNotionalPct", config.risk.maxNotionalPct),
     reversalMode: (stamped.reversalMode as string) ?? config.monitor.reversalMode,
     reversalTf: (stamped.reversalTf as string) ?? config.monitor.reversalTf,
+    entryAlign: (stamped.entryAlign as boolean | undefined) ?? config.monitor.entryAlign,
     playbooks: (stamped.playbooks as string) ?? process.env.PLAYBOOKS ?? "trend-pullback",
   };
 }
@@ -65,7 +66,7 @@ function context(p: ReturnType<typeof effectiveParams>) {
       `trail ${p.trailMult}× · cd ${p.cooldown}` +
       (hasStamp ? "" : " (env — engine hasn't stamped yet)"),
     maxNotional: capLabel,
-    guardian: `${p.reversalMode}@${p.reversalTf}`,
+    guardian: `${p.reversalMode}@${p.reversalTf}${p.entryAlign ? " +align" : ""}`,
   };
 }
 

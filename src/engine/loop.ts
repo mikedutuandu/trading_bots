@@ -478,6 +478,19 @@ async function tryEnter(
   for (const pb of deps.playbooks) {
     const signal = pb.detect(sd.candles, sd.idx, sd.ind, deps.params);
     if (!signal) continue;
+    // ENTRY_ALIGN: a pullback entry is by construction counter to the faster TF — when
+    // the 15m trend is ALREADY against the signal at fill time, the exit-mode guardian
+    // kills the position within a minute (the live "open → REVERSAL_CLOSE at +61m" churn:
+    // 11 of the first 19 live trades, −$5.9 of fees/slippage). Skip and wait for a setup
+    // where the faster TF has rolled over too. The same flag drives the LIVE_SIM replay
+    // (walk-forward validated: better train+OOS on both splits, −22% trades, lower DD).
+    if (config.monitor.entryAlign) {
+      const up = await fasterTfUptrend(symbol, deps.params.donchianPeriod);
+      if (up !== null && againstPosition(up, signal.side === "long")) {
+        logger.debug(`${symbol}: ${signal.side} signal skipped — ${config.monitor.reversalTf} already against (ENTRY_ALIGN)`);
+        continue;
+      }
+    }
     const sized = sizePosition(signal, equity, deps.riskPct, deps.leverage, filter, deps.sizing);
     if (!sized) continue;
 

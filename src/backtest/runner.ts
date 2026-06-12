@@ -39,6 +39,18 @@ export interface BacktestConfig {
     reversalTf: string;
     /** Mirror of MONITOR_REVERSAL_MODE === "exit": false = no flip exits (warn/off). */
     reversalExit: boolean;
+    /** Skip entries the guardian would instantly kill (faster TF already against). */
+    entryAlign?: boolean;
+  };
+}
+
+/** The liveSim block mirrored from the live config — ONE builder shared by
+ *  backtest/sweep/mfe so the trio can't drift as fields are added. */
+export function liveSimFromEnv(): NonNullable<BacktestConfig["liveSim"]> {
+  return {
+    reversalTf: config.monitor.reversalTf,
+    reversalExit: config.monitor.reversalMode === "exit",
+    entryAlign: config.monitor.entryAlign,
   };
 }
 
@@ -371,6 +383,19 @@ export async function runBacktest(cfg: BacktestConfig): Promise<BacktestResult> 
       for (const pb of cfg.playbooks) {
         const signal = pb.detect(sd.candles, i, sd.ind, cfg.params);
         if (!signal) continue;
+        // liveSim entryAlign: skip the entry when the faster TF is ALREADY against it at
+        // fill time — the guardian (exit mode) would kill it within a minute anyway
+        // ("open → REVERSAL_CLOSE 61m later" churn: fee + slippage for a −0.1R scratch).
+        // Verdict source = the last 15m candle CLOSED at the signal bar's close, exactly
+        // what the live guardian's cache would hold one minute after the fill.
+        if (cfg.liveSim?.entryAlign && sd.gd) {
+          const gd = sd.gd;
+          const c0 = sd.candles[i]!;
+          const k = firstAfter(gd.times, c0.closeTime + 1 - gd.tfMs - 1);
+          if (k < gd.times.length && gd.times[k]! + gd.tfMs <= c0.closeTime + 1 && flipAgainst(gd, k, signal.side === "long")) {
+            continue;
+          }
+        }
         const sized = sizePosition(signal, equity, cfg.riskPct, cfg.leverage, filter, cfg.sizing);
         if (!sized) continue;
 

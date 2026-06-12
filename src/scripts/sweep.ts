@@ -8,7 +8,7 @@ import { getExchangeInfo, scopeSymbols } from "../exchange/marketData.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
 import { DEFAULT_PARAMS, type StrategyParams } from "../playbooks/types.js";
 import { liveSizingOpts } from "../risk/sizing.js";
-import { runBacktest, type BacktestConfig } from "../backtest/runner.js";
+import { liveSimFromEnv, runBacktest, type BacktestConfig } from "../backtest/runner.js";
 import { computeMetrics } from "../backtest/metrics.js";
 
 /**
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
   const to = envDateMs("TO");
 
   const liveSim = envBool("LIVE_SIM", false)
-    ? { reversalTf: config.monitor.reversalTf, reversalExit: config.monitor.reversalMode === "exit" }
+    ? liveSimFromEnv()
     : undefined;
 
   const base: Omit<BacktestConfig, "from" | "to" | "params"> = {

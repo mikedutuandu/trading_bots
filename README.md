@@ -65,6 +65,7 @@ only ~45% green days — profits concentrate in a few good days. The edge is THI
 ### Entry — `trend-pullback`
 - **Trend:** EMA50 vs EMA200 on the 1h. Long only in an uptrend, short only in a downtrend.
 - **Gate:** `ADX(14) ≥ 35` (avoid sideways chop — raised from 25 in the 2026-06-10 sweep).
+- **Gate (ENTRY_ALIGN, 2026-06-12):** skip the signal if the **15m trend is already against it** at fill time — the exit-mode guardian would kill it within a minute (the "open → REVERSAL_CLOSE +61m" churn, 11 of the first 19 live trades). Walk-forward: improves train+OOS on both splits, −22% trades, lower DD.
 - **Trigger:** price pulls back to EMA20 and reclaims it with a reversal candle in the trend direction.
 - **Stop:** `entry ∓ 1.5×ATR(14)`. That entry-to-stop distance **is 1R** — the unit everything is measured in.
 

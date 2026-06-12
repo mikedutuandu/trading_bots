@@ -8,7 +8,7 @@ import { getExchangeInfo, scopeSymbols } from "../exchange/marketData.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
 import { envNum, paramsFromEnv } from "../playbooks/paramsFromEnv.js";
 import { liveSizingOpts } from "../risk/sizing.js";
-import { runBacktest, type BacktestConfig } from "../backtest/runner.js";
+import { liveSimFromEnv, runBacktest, type BacktestConfig } from "../backtest/runner.js";
 import { formatReport } from "../backtest/metrics.js";
 
 /**
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   // LIVE_SIM mirrors the .env guardian config so the replay matches what `npm run live`
   // would actually do (flip-exits only when MONITOR_REVERSAL_MODE=exit, same reversalTf).
   const liveSim = envBool("LIVE_SIM", false)
-    ? { reversalTf: config.monitor.reversalTf, reversalExit: config.monitor.reversalMode === "exit" }
+    ? liveSimFromEnv()
     : undefined;
   if (liveSim) {
     logger.info(

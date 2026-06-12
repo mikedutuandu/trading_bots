@@ -121,6 +121,11 @@ export const config = {
     reversalTf: env("MONITOR_REVERSAL_TF", "15m"), // timeframe for the EMA50/EMA200 reversal check
     summaryMin: num("MONITOR_SUMMARY_MIN", 15), // periodic Telegram open-positions summary; 0 = off
     heartbeatHours: num("HEARTBEAT_HOURS", 0), // Telegram the tick-done line every N hours (proof of life when flat); 0 = off
+    // Skip entries whose faster-TF trend is ALREADY against the signal at fill time —
+    // (an ENTRY gate, kept under monitor because it derives from the monitor.s reversal verdict)
+    // the exit-mode guardian would kill them within a minute (open→REVERSAL_CLOSE churn).
+    // Same env drives the LIVE_SIM replay, so live and backtest stay in lockstep.
+    entryAlign: bool("ENTRY_ALIGN", false),
   },
 
   ops: {

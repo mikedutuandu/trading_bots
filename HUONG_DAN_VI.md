@@ -229,6 +229,7 @@ Trailing rộng 3×ATR = **$12**. Lệnh chia **0 / 0.5 / 0.5** (không chốt �
 | **Trần size mỗi lệnh** | **$500 notional** | chặn thiệt hại khi giá GAP qua stop (lỗ gap tỷ lệ theo SIZE, không theo R). Với stop gần, trần này thường "đè" risk thực xuống ~0.3–0.5% |
 | Số lệnh mở cùng lúc | **4** | đã test lại 2026-06-10: 6/8 tệ hơn rõ — 4 là đúng |
 | Lọc vào lệnh | **ADX ≥ 35** | chỉ trend mạnh; ít lệnh nhưng chất |
+| Lọc 15m thuận chiều | **ENTRY_ALIGN** | không vào khi 15m đang ngược lệnh (guardian sẽ cắt ngay trong 1 phút — đỡ mất phí oan) |
 | Chốt lời | **TP1: không chốt (dời hòa vốn) · TP2: chốt 0.5 · trail 0.5** | dồn lời cho runner — combo thắng sweep 2026-06-10 |
 | Trailing | **3×ATR** | đủ rộng để không bị rung ra sớm |
 | Cắt lỗ | **1.5×ATR** (= 1R) | luôn có cắt lỗ; lệnh stop treo sẵn trên sàn + guardian ép mỗi phút |

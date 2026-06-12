@@ -9,7 +9,7 @@ import { getExchangeInfo, scopeSymbols } from "../exchange/marketData.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
 import { paramsFromEnv } from "../playbooks/paramsFromEnv.js";
 import { liveSizingOpts } from "../risk/sizing.js";
-import { runBacktest } from "../backtest/runner.js";
+import { liveSimFromEnv, runBacktest } from "../backtest/runner.js";
 
 /**
  * MFE/MAE path autopsy — "what did price do, hour by hour, AFTER each entry?"
@@ -65,7 +65,7 @@ function liveTrades(): Row[] {
 async function backtestTrades(): Promise<Row[]> {
   const symbols = scopeSymbols(distinctSymbols(config.strategy.timeframe));
   const liveSim = envBool("LIVE_SIM", true) // default ON here: judge under live conditions
-    ? { reversalTf: config.monitor.reversalTf, reversalExit: config.monitor.reversalMode === "exit" }
+    ? liveSimFromEnv()
     : undefined;
   const result = await runBacktest({
     symbols,
