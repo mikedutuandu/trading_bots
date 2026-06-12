@@ -160,7 +160,7 @@ function table(el, head, rows) {
 function ctxStrip(c) {
   return [
     ['risk', c.risk], ['leverage', c.leverage+'x'], ['max open', c.maxOpen],
-    ['cap/trade', c.maxNotional ? '$'+c.maxNotional : 'off'],
+    ['cap/trade', c.maxNotional ?? 'off'],
     ['kill switch', (c.killSwitchPct*100).toFixed(0)+'%'], ['timeframe', c.timeframe],
     ['universe', c.universe], ['playbooks', c.playbooks],
     ['strategy', c.strategy], ['guardian', c.guardian],

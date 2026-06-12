@@ -99,6 +99,7 @@ export async function runEngine(opts: RunOptions): Promise<void> {
       maxHold: deps.params.maxHoldBars,
       stall: deps.params.stallBars,
       maxNotional: config.risk.maxNotionalPerTrade,
+      maxNotionalPct: config.risk.maxNotionalPct,
       reversalMode: config.monitor.reversalMode,
       reversalTf: config.monitor.reversalTf,
       playbooks: deps.playbooks.map((p) => p.name).join("+"),

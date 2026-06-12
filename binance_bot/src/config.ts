@@ -102,6 +102,10 @@ export const config = {
     // Hard ceilings (0 = disabled). Belt-and-suspenders caps for live money.
     maxTradeRiskUsdt: num("MAX_TRADE_RISK_USDT", 0),
     maxNotionalPerTrade: num("MAX_NOTIONAL_PER_TRADE", 0),
+    // Proportional cap: notional/leg <= equity x this fraction — self-scales as the
+    // account grows/shrinks (an absolute cap goes stale). Both caps can be active;
+    // the tighter one wins. 0 = off.
+    maxNotionalPct: num("MAX_NOTIONAL_PCT", 0),
   },
 
   strategy: {

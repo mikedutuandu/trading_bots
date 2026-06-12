@@ -32,6 +32,7 @@ function effectiveParams() {
     stall: n("stall", fb.stallBars),
     maxTotal: fb.maxTotalBars,
     maxNotional: n("maxNotional", config.risk.maxNotionalPerTrade),
+    maxNotionalPct: n("maxNotionalPct", config.risk.maxNotionalPct),
     reversalMode: (stamped.reversalMode as string) ?? config.monitor.reversalMode,
     reversalTf: (stamped.reversalTf as string) ?? config.monitor.reversalTf,
     playbooks: (stamped.playbooks as string) ?? process.env.PLAYBOOKS ?? "trend-pullback",
@@ -41,7 +42,13 @@ function effectiveParams() {
 /** The bot's configured behaviour — so the dashboard shows WHAT it's set to do. */
 function context(p: ReturnType<typeof effectiveParams>) {
   const r = config.risk;
-  const { hasStamp, maxNotional } = p;
+  const { hasStamp, maxNotional, maxNotionalPct } = p;
+  const capLabel =
+    maxNotionalPct > 0
+      ? `${(maxNotionalPct * 100).toFixed(0)}% eq${maxNotional > 0 ? ` (≤$${maxNotional})` : ""}`
+      : maxNotional > 0
+        ? `$${maxNotional}`
+        : null;
   return {
     risk: r.riskUsdt > 0 ? `${r.riskUsdt} USDT` : `${(r.riskPct * 100).toFixed(2)}%`,
     leverage: r.leverage,
@@ -57,7 +64,7 @@ function context(p: ReturnType<typeof effectiveParams>) {
       `ADX≥${p.adxMin} · ATR×${p.atrMult} · TP ${p.take1}/${p.take2} · hold ${p.maxHold}/${p.stall} · ` +
       `trail ${p.trailMult}× · cd ${p.cooldown}` +
       (hasStamp ? "" : " (env — engine hasn't stamped yet)"),
-    maxNotional: maxNotional > 0 ? maxNotional : null,
+    maxNotional: capLabel,
     guardian: `${p.reversalMode}@${p.reversalTf}`,
   };
 }

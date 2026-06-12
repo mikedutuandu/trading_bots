@@ -68,7 +68,8 @@ export interface SizedPosition {
 export interface SizingOpts {
   riskUsdt?: number; // fixed USDT risk per trade; overrides equity*riskPct when > 0
   maxRiskUsdt?: number; // hard ceiling on risk per trade (0 = none)
-  maxNotional?: number; // hard ceiling on notional per trade (0 = none)
+  maxNotional?: number; // hard ceiling on notional per trade, absolute USDT (0 = none)
+  maxNotionalPct?: number; // proportional ceiling: notional ≤ equity × this (0 = none) — self-scales with the account; the tighter cap wins
 }
 
 /**
@@ -94,9 +95,15 @@ export function sizePosition(
   const entry = roundToTick(signal.entry, filter.tickSize);
   let qty = roundToStep(targetRisk / stopDist, filter.stepSize);
 
-  // Cap notional (shrink qty so notional ≤ maxNotional). Reduces risk below target.
-  if (opts.maxNotional && opts.maxNotional > 0 && qty * entry > opts.maxNotional) {
-    qty = roundToStep(opts.maxNotional / entry, filter.stepSize);
+  // Cap notional (shrink qty so notional ≤ the tighter cap). Reduces risk below target.
+  // Two forms: absolute USDT (goes stale as the account moves) and proportional to
+  // CURRENT equity (self-scales — and compounds identically in the backtest replay).
+  const maxNotional = Math.min(
+    opts.maxNotional && opts.maxNotional > 0 ? opts.maxNotional : Infinity,
+    opts.maxNotionalPct && opts.maxNotionalPct > 0 ? equity * opts.maxNotionalPct : Infinity,
+  );
+  if (Number.isFinite(maxNotional) && qty * entry > maxNotional) {
+    qty = roundToStep(maxNotional / entry, filter.stepSize);
   }
   if (qty <= 0 || qty < filter.minQty) return null;
 
@@ -124,5 +131,6 @@ export function liveSizingOpts(): SizingOpts {
     riskUsdt: config.risk.riskUsdt,
     maxRiskUsdt: config.risk.maxTradeRiskUsdt,
     maxNotional: config.risk.maxNotionalPerTrade,
+    maxNotionalPct: config.risk.maxNotionalPct,
   };
 }
