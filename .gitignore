@@ -12,12 +12,21 @@ build/
 *.key
 *.pem
 
-# Data: databases, ticks, backtest output, backups
-data/
+# Data: databases, ticks, backtest output, backups.
+# `data/*` (not `data/`) so the journal snapshot below can be re-included —
+# git cannot un-ignore a file whose parent DIRECTORY is excluded.
+data/*
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
 *.db
+
+# The ONE tracked database: a consistent `.backup` snapshot of the live journal
+# (64KB), committed by the server's daily cron so the journal syncs home via git.
+# NEVER track data/live.sqlite itself — the engine writes it continuously (WAL);
+# committing a hot DB risks a torn copy. Snapshot first:
+#   sqlite3 data/live.sqlite ".backup data/journal-snapshot.sqlite"
+!data/journal-snapshot.sqlite
 
 # Logs
 *.log
