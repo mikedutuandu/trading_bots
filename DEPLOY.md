@@ -1,5 +1,15 @@
 # Running the bot on the server (pm2)
 
+## Install pm2 (once)
+
+pm2 is an **npm** tool, not an apt package — `apt install pm2` fails with "Unable to
+locate package". Install it with npm (you already have npm to run the bot):
+
+```bash
+npm install -g pm2
+pm2 -v        # verify it's on PATH
+```
+
 ## Dead-simple (3 commands on the server)
 
 ```bash
