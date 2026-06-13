@@ -21,12 +21,14 @@ data/*
 *.sqlite-wal
 *.db
 
-# The ONE tracked database: a consistent `.backup` snapshot of the live journal
-# (64KB), committed by the server's daily cron so the journal syncs home via git.
-# NEVER track data/live.sqlite itself — the engine writes it continuously (WAL);
-# committing a hot DB risks a torn copy. Snapshot first:
-#   sqlite3 data/live.sqlite ".backup data/journal-snapshot.sqlite"
-!data/journal-snapshot.sqlite
+# The ONE tracked database: the live trade journal (64KB), committed by the
+# server's daily cron (scripts/journal-push.sh) so it syncs home via git.
+# The cron runs `PRAGMA wal_checkpoint(TRUNCATE)` first so the main file is
+# complete at copy time. Caveats accepted by design: a commit can be a few
+# minutes stale, and a torn copy is theoretically possible but self-heals on
+# the next day's push — the DB the bot writes is never touched by git itself.
+# The -wal/-shm sidecars stay ignored (committing those WOULD corrupt).
+!data/live.sqlite
 
 # Logs
 *.log
