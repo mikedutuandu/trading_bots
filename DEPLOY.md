@@ -38,6 +38,31 @@ Notes:
 
 ---
 
+## Journal sync (server ↔ your Mac)
+
+The live trade journal (`data/live.sqlite`) travels through git. Push it from the server, view it on your Mac.
+
+**On the SERVER** — push the latest journal whenever you want to sync:
+
+```bash
+npm run journal:push    # folds the WAL into the file (so it's current), commits, pushes
+```
+
+**On your MAC** — pull and view (read-only; the bot does NOT run here):
+
+```bash
+git pull                                          # get the server's latest journal
+rm -f data/live.sqlite-wal data/live.sqlite-shm   # clear stale WAL sidecars (else "malformed")
+npm run dashboard:live                            # http://localhost:8788
+```
+
+⚠️ The `rm` is **Mac-only** — never run it on the server (it would corrupt the DB the engine is writing).
+If `git pull` complains about local changes to `data/live.sqlite`, run `git checkout -- data/live.sqlite` first.
+
+> Note: `.env` is gitignored, so config never syncs through git — server and Mac each have their own `.env`.
+
+---
+
 ## Disk / cleanup (25G server)
 
 Space-eaters: **pm2 logs** and **daily DB backups** (`data/backups/`).
