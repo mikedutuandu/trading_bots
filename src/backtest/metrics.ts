@@ -143,6 +143,13 @@ export function formatReport(result: BacktestResult, label: string): string {
     lines.push(`  ${k.padEnd(16)} ${String(g.trades).padStart(4)} trades  ${pct(g.wins / g.trades).padStart(6)} win  ${usd(g.netPnl).padStart(10)} USDT`);
   }
 
+  // Per-side — surfaces a long/short asymmetry (e.g. longs bleeding in a down regime).
+  const bySide = groupBy(result.trades, (t) => t.side);
+  lines.push(`\nBy side:`);
+  for (const [k, g] of bySide) {
+    lines.push(`  ${k.padEnd(16)} ${String(g.trades).padStart(4)} trades  ${pct(g.wins / g.trades).padStart(6)} win  ${usd(g.netPnl).padStart(10)} USDT`);
+  }
+
   // Daily PnL distribution — sets expectations for what a live day looks like.
   const dr = dailyReturns(result.equityCurve).sort((a, b) => a - b);
   if (dr.length >= 5) {
