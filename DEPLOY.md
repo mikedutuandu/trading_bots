@@ -61,6 +61,24 @@ If `git pull` complains about local changes to `data/live.sqlite`, run `git chec
 
 > Note: `.env` is gitignored, so config never syncs through git — server and Mac each have their own `.env`.
 
+### Real-time dashboard — run it on the server (no sync lag)
+
+The pull-to-Mac dashboard above is only as fresh as the last `journal:push`. For *live* data, run the dashboard **on the server** under pm2 — it reads the live DB directly (safe: SQLite WAL allows the engine to write while the dashboard reads):
+
+```bash
+pm2 start npm --name dashboard -- run dashboard:live   # serves localhost:8788 on the server
+pm2 save
+```
+
+Manage it like the bot: `pm2 logs dashboard` · `pm2 restart dashboard` · `pm2 stop dashboard`.
+
+View it from your Mac over an SSH tunnel (the dashboard binds to localhost — keep it off the public internet):
+
+```bash
+ssh -L 8788:localhost:8788 root@<server-ip>
+# then open http://localhost:8788 in your Mac browser → real-time, no pull needed
+```
+
 ---
 
 ## Disk / cleanup (25G server)
