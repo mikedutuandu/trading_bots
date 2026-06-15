@@ -494,6 +494,20 @@ async function tryEnter(
     const sized = sizePosition(signal, equity, deps.riskPct, deps.leverage, filter, deps.sizing);
     if (!sized) continue;
 
+    // Idempotency guard (prevents the 2x-position class): never open if the exchange
+    // ALREADY holds a position here. The in-memory `open` map dedups within a process,
+    // but a restart/reconcile gap could re-enter a symbol that's already open and double
+    // it. An untracked one is NOT auto-adopted — it's alerted below for manual handling
+    // (it keeps whatever resting stop it already had); we just never double it.
+    if (broker.kind === "live") {
+      const existing = await broker.getPosition(symbol).catch(() => null);
+      if (existing && Math.abs(existing.qty) > QTY_DUST) {
+        logger.warn(`${symbol}: exchange already holds ${existing.qty} ${existing.side} — skipping entry to avoid doubling`);
+        void notifyEvent("error", `${symbol}: skipped entry — position already on the exchange (qty ${existing.qty}); not doubling`);
+        continue;
+      }
+    }
+
     await broker.prepareSymbol(symbol, deps.leverage);
     let fill: Awaited<ReturnType<Broker["marketOpen"]>>;
     try {

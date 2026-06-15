@@ -1,9 +1,10 @@
 import type { Side, SymbolFilter } from "../types.js";
 import { logger } from "../logger.js";
 import { getAccountEquity, getPosition, setLeverage } from "../exchange/account.js";
-import { briefError } from "../exchange/binance.js";
+import { briefError, isBinanceCode } from "../exchange/binance.js";
 import {
   cancelAlgoOrder,
+  getOpenAlgoOrders,
   placeMarketOrder,
   placeProtectiveStop,
 } from "../exchange/orders.js";
@@ -65,12 +66,25 @@ export class LiveBroker implements Broker {
     prevStopId: string | null,
   ): Promise<string | null> {
     if (prevStopId) await cancelAlgoOrder(symbol, prevStopId);
+    const place = async () => String(await placeProtectiveStop(symbol, side, stopPrice, this.filter(symbol)));
     // Best-effort: a venue that rejects the stop (or a transient API error) must
     // degrade to bot-managed candle-close stops, never throw into the engine/startup.
     try {
-      const id = await placeProtectiveStop(symbol, side, stopPrice, this.filter(symbol));
-      return String(id);
+      return await place();
     } catch (err) {
+      // -4130 = a closePosition stop already exists in this direction. An ORPHANED stop
+      // (e.g. left by a duplicate entry) that prevStopId didn't reference blocks every
+      // replace forever, freezing the stop at its old level. Clear ALL the symbol's algo
+      // stops once, then retry — this is what unsticks a breakeven/trail move.
+      if (isBinanceCode(err, -4130)) {
+        try {
+          for (const o of await getOpenAlgoOrders(symbol)) await cancelAlgoOrder(symbol, o.algoId);
+          return await place();
+        } catch (e2) {
+          logger.warn(`${symbol}: protective stop not placed after clearing orphans (${briefError(e2)}); managing on candle close`);
+          return null;
+        }
+      }
       logger.warn(`${symbol}: protective stop not placed (${briefError(err)}); managing on candle close instead`);
       return null;
     }
