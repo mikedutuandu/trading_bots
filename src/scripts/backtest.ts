@@ -66,6 +66,7 @@ async function main(): Promise<void> {
     takerFee: config.risk.takerFee,
     slippageBps: config.risk.slippageBps,
     maxOpenPositions: config.risk.maxOpenPositions,
+    maxPerSide: config.risk.maxPerSide,
     maxDailyLossPct: config.risk.maxDailyLossPct,
     sizing: liveSizingOpts(), // mirror the live M8 caps — replay sizes exactly like the engine
   };

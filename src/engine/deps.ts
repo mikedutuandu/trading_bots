@@ -25,6 +25,7 @@ export async function buildEngineDeps(opts: { modelFunding: boolean }): Promise<
     riskPct: config.risk.riskPct,
     leverage: config.risk.leverage,
     maxOpenPositions: config.risk.maxOpenPositions,
+    maxPerSide: config.risk.maxPerSide,
     maxDailyLossPct: config.risk.maxDailyLossPct,
     timeframe: config.strategy.timeframe,
     modelFunding: opts.modelFunding,

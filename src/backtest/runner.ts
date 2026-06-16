@@ -23,6 +23,9 @@ export interface BacktestConfig {
   slippageBps: number;
   maxOpenPositions: number;
   maxDailyLossPct: number;
+  /** 0 = off; else cap concurrent SAME-SIDE positions (anti-correlation: stops the book
+   *  going 100% long/short into a regime turn — the Jun-2026 all-long stop cluster). */
+  maxPerSide?: number;
   /** Live M8 sizing caps (riskUsdt / maxTradeRisk / maxNotional) — pass for live parity. */
   sizing?: SizingOpts;
   from?: number;
@@ -383,6 +386,13 @@ export async function runBacktest(cfg: BacktestConfig): Promise<BacktestResult> 
       for (const pb of cfg.playbooks) {
         const signal = pb.detect(sd.candles, i, sd.ind, cfg.params);
         if (!signal) continue;
+        // Per-side cap: limit concurrent same-side positions (reflects entries already
+        // added earlier in THIS bar's loop, so a single bar can't blow past the cap).
+        if (cfg.maxPerSide !== undefined && cfg.maxPerSide > 0) {
+          let sameSide = 0;
+          for (const ot of open.values()) if (ot.pos.side === signal.side) sameSide++;
+          if (sameSide >= cfg.maxPerSide) continue;
+        }
         // liveSim entryAlign: skip the entry when the faster TF is ALREADY against it at
         // fill time — the guardian (exit mode) would kill it within a minute anyway
         // ("open → REVERSAL_CLOSE 61m later" churn: fee + slippage for a −0.1R scratch).

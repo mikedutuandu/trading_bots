@@ -45,6 +45,7 @@ export interface EngineDeps {
   riskPct: number;
   leverage: number;
   maxOpenPositions: number;
+  maxPerSide: number; // 0 = off; else cap concurrent same-side positions (anti-correlation)
   maxDailyLossPct: number;
   timeframe: string;
   modelFunding: boolean; // charge 8h funding (paper only; live gets it from the exchange)
@@ -478,6 +479,17 @@ async function tryEnter(
   for (const pb of deps.playbooks) {
     const signal = pb.detect(sd.candles, sd.idx, sd.ind, deps.params);
     if (!signal) continue;
+    // Anti-correlation cap: don't let the book go all-in one direction (the Jun-2026
+    // all-long −1R stop cluster). Mirrors the backtest's MAX_PER_SIDE gate. Counts
+    // same-side positions opened earlier in THIS tick too (the scan adds to `open` per fill).
+    if (deps.maxPerSide > 0) {
+      let sameSide = 0;
+      for (const p of open.values()) if (p.pos.side === signal.side) sameSide++;
+      if (sameSide >= deps.maxPerSide) {
+        logger.debug(`${symbol}: ${signal.side} entry skipped — ${sameSide} ${signal.side} already open (MAX_PER_SIDE=${deps.maxPerSide})`);
+        continue;
+      }
+    }
     // ENTRY_ALIGN: a pullback entry is by construction counter to the faster TF — when
     // the 15m trend is ALREADY against the signal at fill time, the exit-mode guardian
     // kills the position within a minute (the live "open → REVERSAL_CLOSE at +61m" churn:

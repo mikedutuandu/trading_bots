@@ -96,6 +96,11 @@ export const config = {
     riskUsdt: num("RISK_USDT", 0),
     leverage: num("LEVERAGE", 10),
     maxOpenPositions: int("MAX_OPEN_POSITIONS", 3),
+    // Cap concurrent SAME-SIDE positions (0 = off). Anti-correlation: stops the book
+    // going all-long/all-short into a regime turn (the 2026-06 all-long −1R stop cluster).
+    // Walk-forward validated at 3 (with maxOpen=4): OOS PF 1.10→1.21, net $122→$234, DD
+    // 32%→26%, fewer −1R stops. The ONLY exit/entry tweak of ~10 tested that helped.
+    maxPerSide: int("MAX_PER_SIDE", 0),
     maxDailyLossPct: num("MAX_DAILY_LOSS_PCT", 0.05),
     takerFee: num("TAKER_FEE", 0.0004),
     slippageBps: num("SLIPPAGE_BPS", 2),

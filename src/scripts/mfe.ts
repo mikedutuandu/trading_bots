@@ -77,6 +77,7 @@ async function backtestTrades(): Promise<Row[]> {
     takerFee: config.risk.takerFee,
     slippageBps: config.risk.slippageBps,
     maxOpenPositions: config.risk.maxOpenPositions,
+    maxPerSide: config.risk.maxPerSide,
     maxDailyLossPct: config.risk.maxDailyLossPct,
     sizing: liveSizingOpts(),
     liveSim,
