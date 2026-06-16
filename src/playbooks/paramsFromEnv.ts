@@ -26,5 +26,6 @@ export function paramsFromEnv(): StrategyParams {
     takeFrac2: envNum("TAKE2", DEFAULT_PARAMS.takeFrac2),
     cooldownBars: envNum("COOLDOWN", DEFAULT_PARAMS.cooldownBars),
     ema200SlopeLookback: envNum("EMA_SLOPE", DEFAULT_PARAMS.ema200SlopeLookback),
+    maxStopWidthPct: envNum("MAX_STOP_WIDTH_PCT", DEFAULT_PARAMS.maxStopWidthPct),
   };
 }

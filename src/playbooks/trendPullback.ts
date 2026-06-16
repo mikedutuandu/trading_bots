@@ -37,6 +37,13 @@ export const trendPullback: Playbook = {
       slopeDown = ema200 < prev;
     }
 
+    // Extreme-volatility filter (optional): the ATR-based stop would sit > maxStopWidthPct
+    // of price away — backtest shows this highest-vol bucket is −EV in both walk-forward
+    // halves. Stop width = atrStopMult·ATR (same for long/short since entry = close).
+    if (params.maxStopWidthPct > 0 && (params.atrStopMult * atr) / c.close > params.maxStopWidthPct) {
+      return null;
+    }
+
     const bullish = c.close > c.open;
     const bearish = c.close < c.open;
 

@@ -29,6 +29,7 @@ export interface StrategyParams {
   takeFrac2: number; // fraction taken at TP2 (remainder trails)
   cooldownBars: number; // bars to wait per-symbol after a close before re-entering
   ema200SlopeLookback: number; // 0 disables; else require EMA200 sloping with the trade
+  maxStopWidthPct: number; // 0 disables; else skip entries whose stop is wider than this % of price (extreme-volatility filter)
 }
 
 export const DEFAULT_PARAMS: StrategyParams = {
@@ -44,6 +45,7 @@ export const DEFAULT_PARAMS: StrategyParams = {
   takeFrac2: 1 / 3,
   cooldownBars: 0,
   ema200SlopeLookback: 0,
+  maxStopWidthPct: 0,
 };
 
 export interface Playbook {
