@@ -8,7 +8,7 @@ import { computeIndicators } from "../playbooks/index.js";
 import type { IndicatorCtx, Playbook, StrategyParams } from "../playbooks/types.js";
 import { sizePosition, splitTranches, type SizingOpts } from "../risk/sizing.js";
 import { closeReasonOf, manageOnCandle, type RuntimePosition } from "../risk/manage.js";
-import { EMA_WARMUP_BARS, againstPosition, fasterTfUp } from "../risk/guardian.js";
+import { EMA_CONVERGE_BARS, EMA_WARMUP_BARS, againstPosition, fasterTfUp } from "../risk/guardian.js";
 import { saveTrade, lastCloseTime, getClosedSince } from "../storage/trades.js";
 import { getDb } from "../storage/db.js";
 import {
@@ -69,7 +69,9 @@ async function fetchSymbolData(
   donchianPeriod: number,
   now: number,
 ): Promise<SymbolData | null> {
-  const raw = await getKlines(symbol, timeframe, { limit: 320 });
+  // Fetch enough history for EMA200 to converge so live matches the backtest (rationale +
+  // audit on EMA_CONVERGE_BARS). Used for BOTH the 1h entry path and the 15m guardian.
+  const raw = await getKlines(symbol, timeframe, { limit: EMA_CONVERGE_BARS });
   const candles = raw.filter((c) => c.closeTime <= now); // only fully-closed candles
   if (candles.length < EMA_WARMUP_BARS) return null; // need EMA200 warmup
   const idx = candles.length - 1;

@@ -6,7 +6,7 @@ import { computeIndicators } from "../playbooks/index.js";
 import { ema } from "../indicators/ta.js";
 import { trendPullback } from "../playbooks/trendPullback.js";
 import { paramsFromEnv } from "../playbooks/paramsFromEnv.js";
-import { EMA_WARMUP_BARS, againstPosition, fasterTfUp } from "../risk/guardian.js";
+import { EMA_CONVERGE_BARS, EMA_WARMUP_BARS, againstPosition, fasterTfUp } from "../risk/guardian.js";
 
 /**
  * "Why is the bot not trading?" — run the REAL detect() against the CURRENT market,
@@ -27,7 +27,7 @@ interface Verdict {
 
 async function scanSymbol(symbol: string): Promise<Verdict | null> {
   const now = Date.now();
-  const raw = await getKlines(symbol, config.strategy.timeframe, { limit: 320 });
+  const raw = await getKlines(symbol, config.strategy.timeframe, { limit: EMA_CONVERGE_BARS });
   const candles = raw.filter((c) => c.closeTime <= now); // closed candles only, like the engine
   if (candles.length < EMA_WARMUP_BARS) return { symbol, trend: "—", adx: NaN, gate: "warmup" };
   const i = candles.length - 1;
@@ -44,7 +44,7 @@ async function scanSymbol(symbol: string): Promise<Verdict | null> {
     // Mirror the engine's ENTRY_ALIGN gate — a bare "SIGNAL" that the next tick would
     // then skip (15m already against) would mislead the operator.
     if (config.monitor.entryAlign) {
-      const rtf = await getKlines(symbol, config.monitor.reversalTf, { limit: 320 });
+      const rtf = await getKlines(symbol, config.monitor.reversalTf, { limit: EMA_CONVERGE_BARS });
       const closes = rtf.filter((k) => k.closeTime <= now).map((k) => k.close);
       const i15 = closes.length - 1;
       if (closes.length >= EMA_WARMUP_BARS) {
