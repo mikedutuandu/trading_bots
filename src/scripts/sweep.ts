@@ -6,7 +6,8 @@ import { getDb, closeDb } from "../storage/db.js";
 import { binance } from "../exchange/binance.js";
 import { getExchangeInfo, scopeSymbols } from "../exchange/marketData.js";
 import { resolvePlaybooks } from "../playbooks/index.js";
-import { DEFAULT_PARAMS, type StrategyParams } from "../playbooks/types.js";
+import { type StrategyParams } from "../playbooks/types.js";
+import { paramsFromEnv } from "../playbooks/paramsFromEnv.js";
 import { liveSizingOpts } from "../risk/sizing.js";
 import { liveSimFromEnv, runBacktest, type BacktestConfig } from "../backtest/runner.js";
 import { computeMetrics } from "../backtest/metrics.js";
@@ -20,7 +21,9 @@ import { computeMetrics } from "../backtest/metrics.js";
  *   BACKTEST_SYMBOLS=env TRAIN_END=2025-12-01 npm run sweep
  *   LIVE_SIM=true BACKTEST_SYMBOLS=env TRAIN_END=2025-12-01 npm run sweep   # judge under live conditions
  *
- * Fixed at the live .env's validated values: trail 3×ATR, cooldown 6, maxOpen 4.
+ * Non-grid knobs (trail, cooldown, maxStopWidthPct, maxOpen, maxPerSide…) come from the
+ * live .env (params via paramsFromEnv, caps via config.risk); only ATR × TP × time-stops ×
+ * ADX are swept — so the sweep reflects the config the engine actually runs.
  */
 
 const GRID = {
@@ -52,17 +55,15 @@ function buildCombos(): Combo[] {
         for (const adxMin of GRID.adxMin) {
           combos.push({
             params: {
-              ...DEFAULT_PARAMS,
+              // Sweep ONLY the four grid dims on top of the live .env (paramsFromEnv) — every
+              // non-grid knob (trail, cooldown, maxStopWidthPct, …) keeps its shipped .env value.
+              ...paramsFromEnv(),
               atrStopMult,
               adxMin,
-              trailMult: 3,
-              cooldownBars: 6,
               takeFrac1: tp.takeFrac1,
               takeFrac2: tp.takeFrac2,
               maxHoldBars: ts.maxHoldBars,
               stallBars: ts.stallBars,
-              maxTotalBars: 0,
-              ema200SlopeLookback: 0,
             },
             label: `ATR${atrStopMult} TP${tp.label} hold${ts.label} ADX${adxMin}`,
           });
