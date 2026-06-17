@@ -41,7 +41,7 @@ finals judged under `LIVE_SIM` — the only combo positive on train AND OOS on b
 | `ATR_MULT` | `1.5` | initial stop; with the guardian ACTIVE 1.5 beats 2.0 (flip-exit absorbs whipsaw) |
 | `TAKE1` / `TAKE2` | `0` / `0.5` | nothing at +1R, half at +2R, **trail the rest** — riders carry the edge |
 | `MAX_HOLD_BARS` / `STALL_BARS` | `12` / `12` | short time-stops pair with the selective ADX35 gate |
-| `TRAIL_MULT` | `3` | runner trails 3×ATR behind the peak (2× backtested worse) |
+| `TRAIL_MULT` | `4` | runner trails 4×ATR behind the peak — re-tuned 3→4 (2026-06-17, 2-split walk-forward): looser trail lets winners run, +25% net / OOS PF 1.11→1.13, at ~+6pt max DD. Tighter (2–2.5) is worse. |
 | `COOLDOWN` | `6` | bars to wait per symbol after a close |
 | `MAX_OPEN_POSITIONS` | `4` | caps correlated exposure — a top risk lever (see §6) |
 | `RISK_PCT` / `RISK_USDT` | `1%` / `0` | risk per trade |
