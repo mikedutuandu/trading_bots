@@ -30,6 +30,7 @@ export type Side = "long" | "short";
 export type PlaybookName =
   | "trend-pullback"
   | "trend-breakout"
+  | "mean-reversion"
   | "volatility"
   | "intraday";
 

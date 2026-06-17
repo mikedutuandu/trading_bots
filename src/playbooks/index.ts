@@ -2,11 +2,13 @@ import type { Candle } from "../types.js";
 import { atr, adx, donchian, ema, rsi } from "../indicators/ta.js";
 import { trendPullback } from "./trendPullback.js";
 import { trendBreakout } from "./trendBreakout.js";
+import { meanReversion } from "./meanReversion.js";
 import type { IndicatorCtx, Playbook } from "./types.js";
 
 export const ALL_PLAYBOOKS: Record<string, Playbook> = {
   "trend-pullback": trendPullback,
   "trend-breakout": trendBreakout,
+  "mean-reversion": meanReversion, // RESEARCH / experimental — opt-in via PLAYBOOKS=mean-reversion
 };
 
 /** Resolve playbooks by name (comma list), defaulting to trend-pullback only. */
