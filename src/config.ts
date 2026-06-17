@@ -103,7 +103,10 @@ export const config = {
     maxPerSide: int("MAX_PER_SIDE", 0),
     maxDailyLossPct: num("MAX_DAILY_LOSS_PCT", 0.05),
     takerFee: num("TAKER_FEE", 0.0004),
-    slippageBps: num("SLIPPAGE_BPS", 2),
+    // BACKTEST + paper(dry-run) cost model ONLY — LiveBroker uses real exchange fills and
+    // never reads this. 5 bps/side ≈ honest for the alt-heavy market-order book (2 bps was
+    // optimistic; the thin edge is very cost-sensitive — judge configs at this realistic level).
+    slippageBps: num("SLIPPAGE_BPS", 5),
     // Hard ceilings (0 = disabled). Belt-and-suspenders caps for live money.
     maxTradeRiskUsdt: num("MAX_TRADE_RISK_USDT", 0),
     maxNotionalPerTrade: num("MAX_NOTIONAL_PER_TRADE", 0),
