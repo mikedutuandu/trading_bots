@@ -67,8 +67,8 @@ const PAGE = `<!doctype html>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #0b0e14; color: #c9d1d9; font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid #1c2230; position: sticky; top: 0; background: #0b0e14; }
+  body { margin: 0; background: #0b0e14; color: #c9d1d9; font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid #1c2230; position: sticky; top: 0; z-index: 5; background: #0b0e14; flex-wrap: wrap; }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
   .online { background: #3fb950; } .stale { background: #d29922; } .idle { background: #6e7681; }
@@ -81,10 +81,12 @@ const PAGE = `<!doctype html>
   section { margin-bottom: 24px; }
   section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: #8b949e; margin: 0 0 8px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid #161b24; }
+  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid #161b24; white-space: nowrap; }
   th:first-child, td:first-child { text-align: left; }
   th { color: #8b949e; font-weight: 500; }
-  .card { background: #11161f; border: 1px solid #1c2230; border-radius: 10px; padding: 14px; }
+  /* Wide tables (esp. Open positions, 13 cols) scroll horizontally inside their card on
+     narrow screens instead of breaking the page layout. */
+  .card { background: #11161f; border: 1px solid #1c2230; border-radius: 10px; padding: 14px; overflow-x: auto; }
   svg { width: 100%; height: 160px; display: block; }
   .tag { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #1c2230; color: #8b949e; }
   .filters { display: flex; gap: 6px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
@@ -96,6 +98,26 @@ const PAGE = `<!doctype html>
   .ctx { padding: 8px 20px; border-bottom: 1px solid #1c2230; color: #8b949e; font-size: 12px;
          display: flex; gap: 16px; flex-wrap: wrap; }
   .ctx b { color: #c9d1d9; font-weight: 600; }
+  /* ── Mobile / narrow screens ── */
+  @media (max-width: 640px) {
+    main { padding: 12px; }
+    header { padding: 11px 14px; gap: 8px; }
+    header h1 { font-size: 14px; }
+    #status, #updated { font-size: 11px; }
+    #updated { width: 100%; } /* drop the "refreshed …" stamp onto its own line */
+    .ctx { padding: 8px 14px; gap: 8px 14px; }
+    .kpis { grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 8px; margin-bottom: 16px; }
+    .kpi { padding: 9px 11px; }
+    .kpi .val { font-size: 17px; }
+    .card { padding: 10px; }
+    table { font-size: 12px; }
+    th, td { padding: 5px 8px; }
+    .filters { gap: 6px 8px; }
+    .filters button { padding: 8px 13px; } /* larger tap targets */
+    svg { height: 130px; } /* viewBox stays 0 0 1000 160; preserveAspectRatio=none scales it down */
+    section { margin-bottom: 18px; }
+    section h2 { margin-bottom: 6px; }
+  }
 </style>
 </head>
 <body>
