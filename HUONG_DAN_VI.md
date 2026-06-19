@@ -206,7 +206,9 @@ Trailing rộng 3×ATR = **$12**. Lệnh chia **0 / 0.5 / 0.5** (không chốt �
 > 📌 Các kiểu "lý do đóng" thấy trong bảng **Recent closed**:
 > **STOP / GUARDIAN_STOP** = cắt lỗ · **MANAGED_STOP** = stop đã dời (hòa vốn/+1R/trailing) ·
 > **REVERSAL_CLOSE** = guardian thoát do đảo chiều 15m · **HEALTH_CLOSE** = xu hướng 1h đảo
-> **hoặc** time-stop (12 nến).
+> **hoặc** time-stop. Có **2 mốc time-stop khác nhau** (2026-06-19): lệnh CHƯA tới TP1 mà "chết" →
+> đóng sau **12 nến** (`MAX_HOLD_BARS`); lệnh ĐÃ ăn TP1 nhưng kẹt chưa tới TP2 → đóng sau **10 nến**
+> (`STALL_BARS`, rút 12→10 để giải phóng slot sớm hơn, giảm sụt vốn ~3 điểm — đã kiểm tra 2 split).
 
 ---
 

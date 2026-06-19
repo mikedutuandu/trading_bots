@@ -40,7 +40,7 @@ finals judged under `LIVE_SIM` — the only combo positive on train AND OOS on b
 | `ADX_MIN` | `35` | selective entries — every robust sweep config used 35 (25 was −EV here) |
 | `ATR_MULT` | `1.5` | initial stop; with the guardian ACTIVE 1.5 beats 2.0 (flip-exit absorbs whipsaw) |
 | `TAKE1` / `TAKE2` | `0` / `0.5` | nothing at +1R, half at +2R, **trail the rest** — riders carry the edge |
-| `MAX_HOLD_BARS` / `STALL_BARS` | `12` / `12` | short time-stops pair with the selective ADX35 gate |
+| `MAX_HOLD_BARS` / `STALL_BARS` | `12` / `10` | short time-stops pair with the selective ADX35 gate. **Not symmetric** — `STALL_BARS` 12→10 (2026-06-19, 2-split walk-forward) is the cheap lever: frees post-TP1 stalled slots 2 bars sooner, OOS net ≥ baseline on BOTH splits AND OOS max DD −2.9pt. `MAX_HOLD_BARS` stays 12 — shrinking it (10/10, 9/9) cuts pre-TP1 riders and bled the edge (avg win 1.40R→1.17R). |
 | `TRAIL_MULT` | `4` | runner trails 4×ATR behind the peak — re-tuned 3→4 (2026-06-17, 2-split walk-forward): looser trail lets winners run, +25% net / OOS PF 1.11→1.13, at ~+6pt max DD. Tighter (2–2.5) is worse. |
 | `COOLDOWN` | `6` | bars to wait per symbol after a close |
 | `MAX_OPEN_POSITIONS` | `4` | caps correlated exposure — a top risk lever (see §6) |
@@ -227,7 +227,7 @@ Built in gated phases; each gate had to pass before advancing. Summary:
 | M9 | Dashboard + ops (alerts, backups) | observable |
 
 **2026-06 improvements** (on top of M0–M9): the intra-minute guardian; `MAX_OPEN_POSITIONS` 10 → 4;
-the 2026-06-10 sweep-winner config (ADX 35, ATR 1.5, TP `0/0.5`, time-stops 12/12 — see §2); live-money
+the 2026-06-10 sweep-winner config (ADX 35, ATR 1.5, TP `0/0.5`, time-stops 12/10 — see §2); live-money
 hardening from a full audit (partial-fill orphan guards, ambiguous-order recovery by clientOrderId,
 adopt-filled-entries, strict env flags, BNB-fee estimates); **LIVE_SIM** (the backtest replays the
 guardian + TP-at-close + live sizing caps — see §5) with `npm run sweep` for walk-forward config search;
