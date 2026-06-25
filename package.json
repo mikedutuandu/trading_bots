@@ -24,7 +24,7 @@
     "dashboard": "tsx src/scripts/dashboard.ts",
     "dashboard:testnet": "DB_PATH=./data/testnet.sqlite DASHBOARD_PORT=8787 tsx src/scripts/dashboard.ts",
     "dashboard:live": "DB_PATH=./data/live.sqlite DASHBOARD_PORT=8788 tsx src/scripts/dashboard.ts",
-    "journal:push": "node -e \"const d=require('better-sqlite3')('./data/live.sqlite'); d.pragma('wal_checkpoint(TRUNCATE)'); d.close()\" && git add data/live.sqlite && (git diff --cached --quiet || git commit -m \"journal $(date -u +%FT%H:%M)\") && git push",
+    "journal:push": "bash scripts/journal-push.sh",
     "backup": "tsx src/scripts/backup.ts",
     "smoke": "tsx src/scripts/smoke.ts",
     "typecheck": "tsc --noEmit",
